@@ -16,11 +16,22 @@
 <div id="app">
   <header class="top">
     <div class="logo"><span class="logo-v">V</span>Actor</div>
+    <button class="routine-btn" id="btnRoutine">▶ Allenamento 10'</button>
     <div class="top-actions">
       <button class="icon-btn" id="btnArchive" aria-label="Archivio">🗂️</button>
       <button class="icon-btn" id="btnSettings" aria-label="Impostazioni">⚙️</button>
     </div>
   </header>
+
+  <div class="rbar" id="rbar" hidden>
+    <div class="rbar-top">
+      <div class="rbar-label"><b id="rStep">Respiro</b><span id="rHint">1 di 4</span></div>
+      <div class="rbar-time" id="rTime">1:00</div>
+      <button class="rbar-btn" id="rNext">Avanti ›</button>
+      <button class="rbar-btn x2" id="rClose" aria-label="Chiudi allenamento">✕</button>
+    </div>
+    <div class="rbar-segs" id="rSegs"><i></i><i></i><i></i><i></i></div>
+  </div>
 
   <button class="title-bar" id="btnLibrary" aria-label="Cambia testo">
     <span class="type-chip" id="curType">🎬 Copione</span>
@@ -38,12 +49,15 @@
       <div class="p-tools">
         <button class="mini" id="fontDown" aria-label="Testo più piccolo">A−</button>
         <button class="mini" id="fontUp" aria-label="Testo più grande">A+</button>
+        <button class="mini diz" id="btnDiz" aria-label="Segni di dizione">è/é</button>
         <button class="mini follow" id="btnFollow" aria-label="Come scorre il gobbo">🎯 Parole</button>
         <button class="mini speed-ctl" id="speedDown" aria-label="Più lento">🐢</button>
         <span class="speed speed-ctl" id="speedVal">40</span>
         <button class="mini speed-ctl" id="speedUp" aria-label="Più veloce">🐇</button>
       </div>
       <div class="follow-note" id="followNote" hidden></div>
+      <div class="diz-legend" id="dizLegend" hidden><span class="dz op">è ò</span> aperta · <span class="dz cl">é ó</span> chiusa · <span class="sz">s</span> sonora · <span class="dz2">parola</span> doppia pronuncia</div>
+      <div class="rpanel" id="rpanel" hidden></div>
       <div class="countdown" id="countdown" hidden>3</div>
     </div>
   </main>
@@ -129,7 +143,13 @@
   <small class="hint">Sul computer scegli qui il tuo microfono USB professionale.</small>
   <div class="field">💾 Spazio usato <b id="storage">—</b></div>
   <div class="field soon">☁️ Copia su Google Drive <span class="pill">prossima fase</span></div>
-  <div class="field soon">🔔 Promemoria per giorno della settimana <span class="pill">prossima fase</span></div>
+  <div class="field">🔔 Promemoria allenamento
+    <small class="hint">Scegli i giorni e l'orario. Google Calendar ti avviserà sul telefono, in mezzo ai tuoi impegni.</small>
+    <div class="days" id="days"></div>
+    <button class="cta small" id="btnCal">📅 Metti in Google Calendar</button>
+    <div class="cal-links" id="calLinks"></div>
+    <div class="today-row">Cambio al volo: solo oggi alle <input type="time" id="todayTime" value="21:00"> <a class="cta small ghost inline" id="todayLink" target="_blank" rel="noopener">📅 Aggiungi</a></div>
+  </div>
   <button class="cta ghost" id="btnInstall" hidden>📲 Installa sul telefono</button>
   <small class="hint">VActor · Fase 1 «La Cabina»</small>
 </dialog>

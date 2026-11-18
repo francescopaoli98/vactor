@@ -1,4 +1,5 @@
-// VActor — Fase 1 «La Cabina»
+// VActor — Fase 1 «La Cabina» + Fase 2 «Palestra di dizione»
+import { BREATH, DRILLS, TWISTERS, READINGS, DIZ_WORDS, DIZ_NOT, DIZ_DOUBLE, DIZ_RULES } from './content.js';
 const $ = (s) => document.querySelector(s);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const fmt = (ms) => { const s = Math.round(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -147,8 +148,37 @@ const F = {
   words: [], pos: 0, shown: -1, active: false, rec: null,
   el: (i) => document.querySelector(`#ptext .w[data-i="${i}"]`),
 };
+function dizWord(core) {
+  const lc = core.toLowerCase();
+  if (/[àèéìòóù]/.test(lc)) return null;
+  if (DIZ_DOUBLE[lc]) return { double: DIZ_DOUBLE[lc] };
+  let r = DIZ_WORDS[lc];
+  if (!r && !DIZ_NOT.has(lc)) for (const [re, ch, off, min] of DIZ_RULES) {
+    if (lc.length < min) continue;
+    const m = lc.match(re);
+    if (m) { r = { i: m.index + off, ch }; break; }
+  }
+  return r || null;
+}
+function dizHTML(text) {
+  return text.split(/([A-Za-zÀ-ÿ]+)/).map((part, k) => {
+    if (k % 2 === 0) return esc(part);
+    const r = dizWord(part);
+    if (r?.double) return `<span class="dz2" title="${esc(r.double)}">${esc(part)}</span>`;
+    let out = '';
+    for (let i = 0; i < part.length; i++) {
+      const c = part[i];
+      if (r && i === r.i) { const a = c === c.toUpperCase() ? r.ch.toUpperCase() : r.ch; out += `<span class="dz ${'èò'.includes(r.ch) ? 'op' : 'cl'}">${a}</span>`; }
+      else if (/s/i.test(c) && /[bdglmnrv]/i.test(part[i + 1] || '')) out += `<span class="sz">${c}</span>`;
+      else out += esc(c);
+    }
+    return out;
+  }).join('');
+}
 function buildPrompter(body) {
   const words = []; let html = '';
+  const diz = S.diz;
+  let inEm = false;
   for (const line of body.split('\n')) {
     let rest = line;
     const m = rest.match(/^\s*[A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý0-9 .'’-]{0,24}:/);
@@ -158,9 +188,17 @@ function buildPrompter(body) {
       if (/^\(.*\)$/.test(part)) { html += `<span class="par">${esc(part)}</span>`; continue; }
       for (const tok of part.split(/(\s+)/)) {
         if (!tok) continue;
-        const n = norm(tok);
-        if (/^\s+$/.test(tok) || !n) { html += esc(tok); continue; }
-        html += `<span class="w" data-i="${words.length}">${esc(tok)}</span>`; words.push(n);
+        if (/^\s+$/.test(tok)) { html += tok; continue; }
+        if (/^\/{1,2}$/.test(tok)) { html += `<span class="pz${tok.length > 1 ? ' l' : ''}" aria-label="pausa">${tok.length > 1 ? '‖' : '|'}</span>`; continue; }
+        const startsEm = tok.startsWith('*'), endsEm = tok.length > 1 && /\*[^\w]*$/.test(tok);
+        if (startsEm) inEm = true;
+        const em = inEm;
+        if (endsEm) inEm = false;
+        const shown = tok.replace(/\*/g, '');
+        const n = norm(shown);
+        const inner = diz ? dizHTML(shown) : esc(shown);
+        if (!n) { html += inner; continue; }
+        html += `<span class="w${em ? ' em' : ''}" data-i="${words.length}">${inner}</span>`; words.push(n);
       }
     }
     html += '\n';
@@ -348,6 +386,7 @@ async function startRec() {
   try { stream = await openMic(); }
   catch { alert('Non riesco ad accedere al microfono. Controlla i permessi del browser.'); return; }
   const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  ctx.resume?.().catch(() => {});
   const src = ctx.createMediaStreamSource(stream);
   const an = ctx.createAnalyser(); an.fftSize = 1024; src.connect(an);
   const buf = new Float32Array(an.fftSize);
@@ -408,20 +447,27 @@ function teardown(R) {
   $('#recTime').textContent = 'tocca per registrare';
   S.rec = null;
 }
-function cancelRec() { teardown(S.rec); }
+function cancelRec() { teardown(S.rec); recStopped(null); }
+let recStopHooks = [];
+const recStopped = (take) => { const h = recStopHooks; recStopHooks = []; h.forEach((f) => f(take)); };
+const waitRecStop = () => new Promise((r) => recStopHooks.push(r));
 
 async function stopRec() {
   const R = S.rec;
+  if (!R || R.stopping) return;
+  if (R.counting) return cancelRec();
+  R.stopping = true;
   const stopped = new Promise((r) => (R.mr.onstop = r));
   R.mr.stop();
   const duration = performance.now() - R.t0;
   await stopped;
   teardown(R);
-  if (duration < 700) return;
+  if (duration < 700) return recStopped(null);
   const take = { id: uid(), textId: S.text.id, blob: new Blob(R.chunks, { type: R.mime }), mime: R.mime, duration, createdAt: Date.now(), mode: S.mode, starred: false };
   await DB.put('takes', take);
   await refreshTakes();
   showToast(S.takes.at(-1));
+  recStopped(S.takes.at(-1));
 }
 
 /* ---------- riascolto ---------- */
@@ -748,6 +794,250 @@ async function checkInbox() {
   if (files.length) { openNew(); await ingest(files); }
 }
 
+/* ---------- segni di dizione ---------- */
+S.diz = ls.get('diz', false);
+function applyDiz() {
+  $('#btnDiz').classList.toggle('on', S.diz);
+  $('#dizLegend').hidden = !S.diz;
+}
+$('#btnDiz').onclick = () => {
+  if (S.rec) return;
+  S.diz = !S.diz; ls.set('diz', S.diz); applyDiz();
+  const top = $('#prompter').scrollTop; renderText(); $('#prompter').scrollTop = top;
+};
+applyDiz();
+
+/* ---------- Fase 2: allenamento di 10 minuti ---------- */
+const pad2 = (n) => String(n).padStart(2, '0');
+const dayKey = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const dayNum = () => Math.floor((Date.now() - new Date().getTimezoneOffset() * 60000) / 86400000);
+const STEPS = [
+  { k: 'respiro', label: 'Respiro', dur: 60 },
+  { k: 'artic', label: 'Articolazione', dur: 60 },
+  { k: 'twist', label: 'Scioglilingua', dur: 180 },
+  { k: 'read', label: 'Lettura del giorno', dur: 300 },
+];
+function todayPlan() {
+  const d = dayNum();
+  const drills = [0, 1, 2, 3].map((i) => DRILLS[(d * 4 + i) % DRILLS.length]);
+  const twisters = [1, 2, 3].map((lv) => {
+    const list = TWISTERS.map((t, i) => ({ ...t, idx: i })).filter((t) => t.l === lv);
+    return list[d % list.length];
+  });
+  const ri = d % READINGS.length;
+  return { drills, twisters, reading: { ...READINGS[ri], idx: ri } };
+}
+async function ensureText(id, data) {
+  let t = await DB.get('texts', id);
+  if (!t) { t = { id, ...data, builtin: true, video: null, createdAt: Date.now(), lastUsed: 0 }; await DB.put('texts', t); }
+  return t;
+}
+const RT = { on: false, step: -1, stepT0: 0, tick: null, abort: false, skip: null };
+const rpanel = (html, card) => { const p = $('#rpanel'); p.hidden = !html; p.innerHTML = html || ''; p.classList.toggle('card', !!card); };
+function routineDone() { const log = ls.get('routineLog', {}); return !!log[dayKey()]; }
+function paintRoutineBtn() {
+  const b = $('#btnRoutine');
+  const done = routineDone();
+  b.textContent = done ? '✓ Fatto oggi' : "▶ Allenamento 10'";
+  b.classList.toggle('done', done);
+}
+function paintBar() {
+  if (!RT.on) return;
+  const st = STEPS[RT.step]; if (!st) return;
+  const left = Math.max(0, st.dur - (Date.now() - RT.stepT0) / 1000);
+  const sec = Math.ceil(left);
+  $('#rTime').textContent = sec > 0 ? `${Math.floor(sec / 60)}:${pad2(sec % 60)}` : (st.k === 'read' ? 'tempo!' : '0:00');
+  [...$('#rSegs').children].forEach((el, i) => {
+    el.style.setProperty('--p', i < RT.step ? 1 : i > RT.step ? 0 : Math.min(1, (Date.now() - RT.stepT0) / 1000 / st.dur));
+  });
+}
+const wait = (ms) => new Promise((res) => {
+  const t = setTimeout(() => { RT.skip = null; res('time'); }, ms);
+  RT.skip = () => { clearTimeout(t); RT.skip = null; res('skip'); };
+});
+function setStep(i, hint) {
+  RT.step = i; RT.stepT0 = Date.now();
+  $('#rStep').textContent = STEPS[i].label;
+  $('#rHint').textContent = hint || `${i + 1} di ${STEPS.length}`;
+  paintBar();
+}
+
+async function stepBreath() {
+  setStep(0, 'Rilassa le spalle, respira con la pancia');
+  rpanel(`<div class="breath"><div class="bcircle" id="bc"></div><div class="btext" id="bt">Pronto…</div><div class="bsub" id="bs"></div></div>`);
+  const phases = [['Inspira dal naso', BREATH.inhale, 'in'], ['Trattieni', BREATH.hold, 'hold'], ['Espira su «sss»', BREATH.exhale, 'out']];
+  const end = Date.now() + STEPS[0].dur * 1000;
+  while (Date.now() < end && RT.on && !RT.abort) {
+    for (const [txt, sec, cls] of phases) {
+      if (!RT.on || RT.abort) return;
+      const bc = $('#bc'); if (!bc) return;
+      bc.style.transitionDuration = sec + 's'; bc.className = 'bcircle ' + cls;
+      $('#bt').textContent = txt; $('#bs').textContent = `${sec} secondi`;
+      if ((await wait(sec * 1000)) === 'skip') return;
+    }
+  }
+}
+async function stepArtic(plan) {
+  setStep(1, '4 esercizi da 15 secondi');
+  for (let i = 0; i < plan.drills.length; i++) {
+    if (!RT.on || RT.abort) return;
+    const d = plan.drills[i];
+    rpanel(`<div class="drill"><div class="dnum">${i + 1} / ${plan.drills.length}</div><h3>${esc(d.t)}</h3><p>${esc(d.d)}</p>
+      <div class="dbar"><i style="animation-duration:15s"></i></div></div>`);
+    await wait(15000);
+  }
+}
+async function recordOn(textId, limitSec, hint) {
+  await selectText(textId);
+  $('#rHint').textContent = hint;
+  rpanel('');
+  await startRec();
+  if (!S.rec) return 'fail';
+  const stop = waitRecStop();
+  let timer = null;
+  if (limitSec) timer = setTimeout(() => { if (S.rec) stopRec(); }, limitSec * 1000);
+  RT.skip = () => { RT.skip = null; if (S.rec) stopRec(); };
+  await stop;
+  clearTimeout(timer); RT.skip = null;
+  return 'ok';
+}
+async function stepTwist(plan) {
+  setStep(2);
+  for (let i = 0; i < plan.twisters.length; i++) {
+    if (!RT.on || RT.abort) return;
+    const tw = plan.twisters[i];
+    await ensureText(`tw-${tw.idx}`, { title: `Scioglilingua · ${tw.f}`, type: 'dizione', body: tw.t });
+    await selectText(`tw-${tw.idx}`);
+    rpanel(`<div class="drill"><div class="dnum">Scioglilingua ${i + 1} di 3 · livello ${'●'.repeat(tw.l)}${'○'.repeat(3 - tw.l)}</div>
+      <h3>Ripetilo 3 volte</h3><p>Prima <b>lento</b>, poi <b>normale</b>, poi <b>veloce</b>. Ogni sillaba pulita.</p>
+      <button class="cta" id="twGo">● Registra</button></div>`, true);
+    const go = await new Promise((res) => { $('#twGo').onclick = () => res('go'); RT.skip = () => res('skip'); setTimeout(() => res('go'), 4000); });
+    RT.skip = null;
+    if (go === 'skip' || !RT.on) continue;
+    if ((await recordOn(`tw-${tw.idx}`, 55, `${i + 1} di 3 · lento → normale → veloce`)) === 'fail') return 'fail';
+  }
+}
+async function stepRead(plan) {
+  setStep(3);
+  const r = plan.reading;
+  const id = `rd-${r.idx}`;
+  await ensureText(id, { title: r.title, type: r.type, body: r.body });
+  rpanel(`<div class="drill"><div class="dnum">Lettura del giorno · ${esc(r.g)}</div><h3>${esc(r.title)}</h3>
+    <p><span class="pz">|</span> pausa breve · <span class="pz l">‖</span> pausa lunga · <b class="em-demo">evidenziato</b> = parola chiave.<br>Leggila una volta per capirla, poi registra con l'intenzione giusta.</p>
+    <button class="cta" id="rdGo">● Registra</button></div>`, true);
+  await selectText(id);
+  const go = await new Promise((res) => { $('#rdGo').onclick = () => res('go'); RT.skip = () => res('skip'); });
+  RT.skip = null;
+  if (go === 'skip' || !RT.on) return;
+  RT.stepT0 = Date.now();
+  return recordOn(id, 0, 'Leggi con calma: il gobbo ti segue');
+}
+async function startRoutine() {
+  if (RT.on || S.rec) return;
+  stopPlayer();
+  const plan = todayPlan();
+  RT.on = true; RT.abort = false; RT.t0 = Date.now(); RT.plan = plan;
+  document.body.classList.add('routine');
+  $('#rbar').hidden = false;
+  RT.tick = setInterval(paintBar, 250);
+  try {
+    await stepBreath(); if (!RT.on) return;
+    await stepArtic(plan); if (!RT.on) return;
+    if ((await stepTwist(plan)) === 'fail' || !RT.on) return endRoutine();
+    await stepRead(plan); if (!RT.on) return;
+    await finishRoutine(plan);
+  } catch (e) { console.error(e); endRoutine(); }
+}
+async function finishRoutine(plan) {
+  const secs = Math.round((Date.now() - RT.t0) / 1000);
+  const log = ls.get('routineLog', {}); log[dayKey()] = (log[dayKey()] || 0) + secs; ls.set('routineLog', log);
+  paintRoutineBtn();
+  clearInterval(RT.tick);
+  $('#rStep').textContent = 'Allenamento completato'; $('#rHint').textContent = `${Math.floor(secs / 60)} min ${secs % 60} s`;
+  $('#rTime').textContent = '✓';
+  [...$('#rSegs').children].forEach((el) => el.style.setProperty('--p', 1));
+  const ks = (await DB.takesOf(`rd-${plan.reading.idx}`)).sort((a, b) => a.createdAt - b.createdAt);
+  const days = Object.keys(log).length;
+  let ab = '';
+  if (ks.length >= 2) {
+    const prev = ks.at(-2), cur = ks.at(-1);
+    ab = `<div class="pd"><h4>Prima e dopo</h4><p>Hai già letto questo testo il ${new Date(prev.createdAt).toLocaleDateString('it-IT', { day: 'numeric', month: 'long' })}. Ascolta la differenza:</p>
+      <div class="pd-row"><button class="cta small ghost" data-pd="${prev.id}">▶ Volta scorsa</button><button class="cta small" data-pd="${cur.id}">▶ Oggi</button></div></div>`;
+  }
+  rpanel(`<div class="drill done"><div class="big-check">✓</div><h3>Fatto, ottimo lavoro.</h3>
+    <p>${days === 1 ? 'Primo giorno di allenamento.' : `${days} giorni di allenamento in tutto.`} Le registrazioni sono nell'archivio.</p>${ab}
+    <button class="cta" id="rEnd">Chiudi</button></div>`);
+  $('#rpanel').onclick = async (e) => {
+    const b = e.target.closest('[data-pd]');
+    if (b) { const k = await DB.get('takes', b.dataset.pd); const txt = b.textContent; if (playTake(k, () => (b.textContent = txt))) b.textContent = '⏸ Stop'; }
+    if (e.target.id === 'rEnd') endRoutine();
+  };
+  $('#rNext').hidden = true;
+}
+function endRoutine() {
+  RT.on = false; RT.abort = true;
+  RT.skip?.();
+  clearInterval(RT.tick);
+  if (S.rec) S.rec.counting ? cancelRec() : stopRec();
+  stopPlayer();
+  rpanel(''); $('#rpanel').onclick = null;
+  $('#rbar').hidden = true; $('#rNext').hidden = false;
+  document.body.classList.remove('routine');
+  paintRoutineBtn();
+}
+$('#btnRoutine').onclick = () => (RT.on ? null : startRoutine());
+$('#rNext').onclick = () => RT.skip?.();
+$('#rClose').onclick = () => { if (confirm('Interrompere l\'allenamento? Le registrazioni fatte restano salvate.')) endRoutine(); };
+paintRoutineBtn();
+
+/* ---------- promemoria (Google Calendar) ---------- */
+const WD = [['Lun', 1, 'MO'], ['Mar', 2, 'TU'], ['Mer', 3, 'WE'], ['Gio', 4, 'TH'], ['Ven', 5, 'FR'], ['Sab', 6, 'SA'], ['Dom', 0, 'SU']];
+S.remind = ls.get('remind', { 1: '21:00', 2: '21:00', 3: '21:00', 4: '21:00', 5: '21:00' });
+const appURL = () => new URL('./?routine=1', location.href).href;
+function calURL({ start, recur }) {
+  const end = new Date(start.getTime() + 10 * 60000);
+  const f = (d) => `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}T${pad2(d.getHours())}${pad2(d.getMinutes())}00`;
+  const u = new URL('https://calendar.google.com/calendar/render');
+  u.searchParams.set('action', 'TEMPLATE');
+  u.searchParams.set('text', '🎙️ VActor · allenamento 10 minuti');
+  u.searchParams.set('dates', `${f(start)}/${f(end)}`);
+  u.searchParams.set('ctz', Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Rome');
+  u.searchParams.set('details', `Respiro, articolazione, scioglilingua e lettura del giorno.\nApri: ${appURL()}`);
+  if (recur) u.searchParams.set('recur', recur);
+  return u.href;
+}
+function nextDate(days, hhmm) {
+  const [h, m] = hhmm.split(':').map(Number);
+  for (let i = 0; i < 8; i++) {
+    const d = new Date(); d.setDate(d.getDate() + i); d.setHours(h, m, 0, 0);
+    if (days.includes(d.getDay()) && d > new Date()) return d;
+  }
+  return new Date();
+}
+function renderDays() {
+  $('#days').innerHTML = WD.map(([lab, n]) => `<label class="day ${S.remind[n] ? 'on' : ''}">
+    <input type="checkbox" data-d="${n}" ${S.remind[n] ? 'checked' : ''}><span>${lab}</span>
+    <input type="time" data-t="${n}" value="${S.remind[n] || '21:00'}" ${S.remind[n] ? '' : 'disabled'}></label>`).join('');
+  $('#calLinks').innerHTML = '';
+  const t = $('#todayTime'); $('#todayLink').href = calURL({ start: nextDate([new Date().getDay(), (new Date().getDay() + 1) % 7], t.value) });
+}
+$('#days').onchange = (e) => {
+  const n = e.target.dataset.d ?? e.target.dataset.t;
+  if (e.target.dataset.d !== undefined) { if (e.target.checked) S.remind[n] = $(`[data-t="${n}"]`).value || '21:00'; else delete S.remind[n]; }
+  else if (S.remind[n]) S.remind[n] = e.target.value;
+  ls.set('remind', S.remind); renderDays();
+};
+$('#todayTime').oninput = () => renderDays();
+$('#btnCal').onclick = () => {
+  const groups = {};
+  for (const [lab, n, code] of WD) if (S.remind[n]) (groups[S.remind[n]] ||= []).push([lab, n, code]);
+  const entries = Object.entries(groups);
+  if (!entries.length) { $('#calLinks').innerHTML = '<small class="hint">Scegli almeno un giorno.</small>'; return; }
+  $('#calLinks').innerHTML = `<small class="hint">${entries.length > 1 ? 'Tocca ogni riga e premi «Salva» in Calendar:' : 'Tocca e premi «Salva» in Calendar:'}</small>` +
+    entries.map(([time, ds]) => `<a class="cal-link" target="_blank" rel="noopener" href="${calURL({ start: nextDate(ds.map((d) => d[1]), time), recur: `RRULE:FREQ=WEEKLY;BYDAY=${ds.map((d) => d[2]).join(',')}` })}">📅 ${ds.map((d) => d[0]).join(', ')} alle ${time} ›</a>`).join('');
+};
+renderDays();
+
 /* ---------- avvio ---------- */
 applyPrefs();
 const texts = await ensureSeeds();
@@ -756,3 +1046,9 @@ await selectText(texts.find((t) => t.id === curId)?.id || texts.sort((a, b) => b
 if (S.follow === 'parole') setTimeout(() => loadVosk().catch((e) => console.warn('vosk', e)), 1500);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 checkInbox();
+if (new URLSearchParams(location.search).has('routine')) {
+  history.replaceState(null, '', location.pathname);
+  rpanel(`<div class="drill"><div class="dnum">È l'ora dell'allenamento</div><h3>10 minuti per la tua voce</h3>
+    <p>Respiro, articolazione, scioglilingua e lettura del giorno. Ti guido io.</p><button class="cta" id="rStart">▶ Inizia</button></div>`);
+  $('#rStart').onclick = () => { rpanel(''); startRoutine(); };
+}
