@@ -83,10 +83,10 @@ function renderText() {
       ? '<span class="empty">Solo video, nessun copione.\nPuoi già registrare il doppiaggio: il video parte con il REC.\n\nNella Fase 3 la banda ritmica si creerà da sola ascoltando la voce originale.</span>'
       : '<span class="empty">Tocca «＋ Nuovo» per caricare un testo.</span>';
   } else {
-    html = esc(t.body)
-      .replace(/^([A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý0-9 .'’-]{0,24}:)/gm, '<span class="spk">$1</span>')
-      .replace(/(\([^)\n]{1,60}\))/g, '<span class="par">$1</span>');
+    const b = buildPrompter(t.body); html = b.html; F.words = b.words;
   }
+  if (!t?.body?.trim()) F.words = [];
+  F.pos = 0; F.shown = -1;
   $('#ptext').innerHTML = html;
   $('#prompter').scrollTop = 0;
   const v = $('#video');
@@ -102,8 +102,14 @@ function renderText() {
     $('#guideRow').hidden = true;
   }
 }
+function alignPad() {
+  const pr = $('#prompter');
+  pr.style.paddingTop = Math.max(16, pr.clientHeight * 0.28 - S.font * 0.9) + 'px';
+}
+new ResizeObserver(alignPad).observe(document.querySelector('.prompter-wrap'));
 function applyPrefs() {
   document.documentElement.style.setProperty('--pfont', S.font + 'px');
+  alignPad();
   $('#speedVal').textContent = S.speed;
   const out = S.mode === 'fuori';
   $('#btnMode').textContent = out ? '🌳 Fuori · riduzione rumore' : '🏠 Casa · audio puro';
@@ -133,6 +139,139 @@ $('#speedUp').onclick = () => { S.speed = Math.min(200, S.speed + 5); ls.set('sp
 $('#speedDown').onclick = () => { S.speed = Math.max(5, S.speed - 5); ls.set('speed', S.speed); applyPrefs(); };
 $('#btnMode').onclick = () => { if (S.rec) return; S.mode = S.mode === 'casa' ? 'fuori' : 'casa'; ls.set('mode', S.mode); applyPrefs(); };
 $('#guideVol').oninput = (e) => { S.guide = +e.target.value; ls.set('guide', S.guide); };
+
+/* ---------- gobbo che segue le parole ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+S.follow = ls.get('follow', SR ? 'parole' : 'voce');
+const norm = (w) => w.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+const F = {
+  words: [], pos: 0, shown: -1, active: false, rec: null,
+  el: (i) => document.querySelector(`#ptext .w[data-i="${i}"]`),
+};
+function buildPrompter(body) {
+  const words = []; let html = '';
+  for (const line of body.split('\n')) {
+    let rest = line;
+    const m = rest.match(/^\s*[A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý0-9 .'’-]{0,24}:/);
+    if (m) { html += `<span class="spk">${esc(m[0])}</span>`; rest = rest.slice(m[0].length); }
+    for (const part of rest.split(/(\([^)\n]{1,80}\))/)) {
+      if (!part) continue;
+      if (/^\(.*\)$/.test(part)) { html += `<span class="par">${esc(part)}</span>`; continue; }
+      for (const tok of part.split(/(\s+)/)) {
+        if (!tok) continue;
+        const n = norm(tok);
+        if (/^\s+$/.test(tok) || !n) { html += esc(tok); continue; }
+        html += `<span class="w" data-i="${words.length}">${esc(tok)}</span>`; words.push(n);
+      }
+    }
+    html += '\n';
+  }
+  return { html, words };
+}
+function lev(a, b) {
+  const d = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = d[0]; d[0] = i;
+    for (let j = 1; j <= b.length; j++) { const t = d[j]; d[j] = Math.min(d[j] + 1, d[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = t; }
+  }
+  return d[b.length];
+}
+function similar(a, b) {
+  if (a === b) return true;
+  const L = Math.max(a.length, b.length), m = Math.min(a.length, b.length);
+  if (L < 4) return false;
+  if (m >= 4 && (a.startsWith(b) || b.startsWith(a))) return true;
+  return lev(a, b) <= (L >= 7 ? 2 : 1);
+}
+// avanza il segnalibro nel testo in base alle parole sentite
+function advance(pos, heard, words = F.words) {
+  for (let k = 0; k < heard.length; k++) {
+    const w = heard[k];
+    const win = w.length <= 2 ? 3 : 8;
+    let found = -1;
+    for (let j = pos; j < Math.min(words.length, pos + win); j++) if (similar(words[j], w)) { found = j; break; }
+    if (found < 0 && k > 0) { // salto di riga: ritrova il punto con due parole di fila
+      const p = heard[k - 1];
+      for (let j = pos + 1; j < Math.min(words.length, pos + 80); j++) if (similar(words[j], w) && similar(words[j - 1], p)) { found = j; break; }
+    }
+    if (found >= 0) pos = found + 1;
+  }
+  return pos;
+}
+function paintFollow() {
+  if (F.pos === F.shown) return;
+  const from = Math.max(0, Math.min(F.shown, F.pos)), to = Math.max(F.shown, F.pos);
+  for (let i = from; i <= to + 1 && i < F.words.length; i++) {
+    const el = F.el(i); if (!el) continue;
+    el.classList.toggle('r', i < F.pos); el.classList.toggle('cur', i === F.pos);
+  }
+  F.shown = F.pos;
+}
+function clearFollow() {
+  document.querySelectorAll('#ptext .w.r, #ptext .w.cur').forEach((e) => e.classList.remove('r', 'cur'));
+  F.shown = -1;
+}
+function firstVisibleWord() {
+  const pr = $('#prompter'), line = pr.scrollTop + pr.clientHeight * 0.28 - 30;
+  if (pr.scrollTop < 10) return 0;
+  for (let i = 0; i < F.words.length; i++) { const el = F.el(i); if (el && el.offsetTop >= line) return i; }
+  return 0;
+}
+function followNote(msg) { const n = $('#followNote'); n.textContent = msg; n.hidden = !msg; }
+async function startFollow(R) {
+  if (!SR) { followNote('🔊 Questo browser non riconosce le parole: scorro con la voce'); return; }
+  clearFollow();
+  F.pos = firstVisibleWord(); F.committed = F.pos; paintFollow();
+  F.active = true;
+  const rec = new SR();
+  rec.lang = 'it-IT'; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
+  try { // riconoscimento sul telefono, se disponibile (privacy + offline)
+    if (SR.available) {
+      const st = await SR.available({ langs: ['it-IT'], processLocally: true });
+      if (st === 'available') rec.processLocally = true;
+      else if (st === 'downloadable' && SR.install) SR.install({ langs: ['it-IT'], processLocally: true }).catch(() => {});
+    }
+  } catch {}
+  rec.onresult = (e) => {
+    let interim = [];
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i], heard = r[0].transcript.split(/\s+/).map(norm).filter(Boolean);
+      if (r.isFinal) F.committed = advance(F.committed, heard); else interim.push(...heard);
+    }
+    F.pos = Math.max(F.pos, F.committed, advance(F.committed, interim));
+    paintFollow();
+    followNote('');
+  };
+  rec.onerror = (e) => {
+    if (['not-allowed', 'service-not-allowed', 'language-not-supported', 'audio-capture'].includes(e.error)) {
+      F.active = false; F.fatal = true;
+      followNote('🔊 Riconoscimento parole non disponibile: scorro con la voce');
+    } else if (e.error === 'network') followNote('📶 Serve internet per riconoscere le parole');
+  };
+  rec.onend = () => { if (F.rec === rec && F.active && !F.fatal) { try { rec.start(F.track); } catch {} } };
+  F.rec = rec; F.fatal = false;
+  F.track = R.stream.getAudioTracks()[0];
+  try { rec.start(F.track); } catch { try { rec.start(); } catch { F.active = false; followNote('🔊 Scorro con la voce'); } }
+  followNote('🎯 Ti seguo: inizia a leggere');
+}
+function stopFollow() {
+  const rec = F.rec; F.rec = null; F.active = false;
+  try { rec?.abort(); } catch {}
+  followNote('');
+}
+function applyFollowUI() {
+  const w = S.follow === 'parole';
+  $('#btnFollow').textContent = w ? '🎯 Parole' : '🔊 Voce';
+  $('#btnFollow').classList.toggle('on', w);
+  document.querySelectorAll('.speed-ctl').forEach((e) => (e.hidden = w));
+}
+$('#btnFollow').onclick = () => {
+  if (S.rec) return;
+  S.follow = S.follow === 'parole' ? 'voce' : 'parole';
+  if (S.follow === 'parole' && !SR) { S.follow = 'voce'; followNote('Questo browser non riconosce le parole. Usa Chrome.'); setTimeout(() => followNote(''), 3000); }
+  ls.set('follow', S.follow); applyFollowUI(); clearFollow();
+};
+applyFollowUI();
 
 /* ---------- registrazione ---------- */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -195,14 +334,21 @@ async function startRec() {
     const lv = rms();
     $('#level').style.transform = `translate(-50%,-50%) scale(${1 + Math.min(0.6, lv * 6)})`;
     quiet = lv > R.thr ? 0 : quiet + dt;
-    if (quiet < 0.35) $('#prompter').scrollTop += S.speed * dt; // scorre solo mentre parli
+    const pr = $('#prompter');
+    if (F.active && F.words.length) {
+      // segue le parole riconosciute: porta la parola corrente sulla linea verde
+      const el = F.el(Math.min(F.pos, F.words.length - 1));
+      if (el) { const target = el.offsetTop - pr.clientHeight * 0.28 + el.offsetHeight * 0.2; pr.scrollTop += (target - pr.scrollTop) * Math.min(1, dt * 5); }
+    } else if (quiet < 0.35) pr.scrollTop += S.speed * dt; // modalità voce: scorre solo mentre parli
     $('#recTime').textContent = '● ' + fmt(now - R.t0);
     R.raf = requestAnimationFrame(loop);
   };
   R.raf = requestAnimationFrame(loop);
+  if (S.follow === 'parole' && F.words.length) startFollow(R);
 }
 
 function teardown(R) {
+  stopFollow();
   cancelAnimationFrame(R.raf);
   R.stream.getTracks().forEach((t) => t.stop());
   R.ctx.close().catch(() => {});

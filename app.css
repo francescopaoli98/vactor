@@ -138,3 +138,12 @@ dialog::backdrop{background:#000a;backdrop-filter:blur(3px)}
 .empty-note{color:var(--muted);text-align:center;padding:24px 8px}
 
 @media (min-width:700px){ :root{--pfont:36px} }
+
+/* gobbo che segue le parole */
+.ptext .w{transition:color .25s,text-shadow .25s}
+.ptext .w.r{color:#6f8f80}
+.ptext .w.cur{color:var(--neon);text-shadow:0 0 14px #2bff8a99}
+.mini.follow{padding:0 10px;color:var(--text);font-size:13px}
+.mini.follow.on{color:var(--neon)}
+.follow-note{position:absolute;left:10px;top:10px;z-index:2;padding:6px 12px;border-radius:99px;font-size:13px;
+  background:#050a08d9;border:1px solid var(--line2);color:var(--neon);backdrop-filter:blur(6px)}
