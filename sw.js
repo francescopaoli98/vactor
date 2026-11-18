@@ -1,5 +1,5 @@
-const VERSION = 'vactor-v2';
-const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
+const VERSION = 'vactor-v3';
+const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'lib/vosk.js'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -30,6 +30,7 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
 
   // app: prima la rete (così gli aggiornamenti arrivano subito), poi la cache offline
+  if (url.origin === location.origin && url.pathname.includes('/models/')) return; // il modello vocale lo salva l'app
   if (url.origin === location.origin) {
     e.respondWith(fetch(e.request).then((r) => {
       if (r.ok) { const cp = r.clone(); caches.open(VERSION).then((c) => c.put(e.request, cp)); }

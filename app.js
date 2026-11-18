@@ -141,8 +141,7 @@ $('#btnMode').onclick = () => { if (S.rec) return; S.mode = S.mode === 'casa' ? 
 $('#guideVol').oninput = (e) => { S.guide = +e.target.value; ls.set('guide', S.guide); };
 
 /* ---------- gobbo che segue le parole ---------- */
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-S.follow = ls.get('follow', SR ? 'parole' : 'voce');
+S.follow = ls.get('follow2', 'parole');
 const norm = (w) => w.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
 const F = {
   words: [], pos: 0, shown: -1, active: false, rec: null,
@@ -218,45 +217,95 @@ function firstVisibleWord() {
   return 0;
 }
 function followNote(msg) { const n = $('#followNote'); n.textContent = msg; n.hidden = !msg; }
+
+// Riconoscimento vocale offline (Vosk, modello italiano) che ascolta lo stesso audio della registrazione:
+// nessun conflitto con il microfono, funziona anche senza internet.
+const MODEL_URL = 'models/vosk-it.tar.gz';
+const VOSK = { model: null, loading: null, pct: 0 };
+function loadVosk() {
+  if (VOSK.model) return Promise.resolve(VOSK.model);
+  return (VOSK.loading ||= (async () => {
+    if (!window.Vosk) await loadScript('lib/vosk.js');
+    let blob = null;
+    let cache = null;
+    try { cache = await caches.open('vactor-models'); const hit = await cache.match(MODEL_URL); if (hit) blob = await hit.blob(); } catch {}
+    if (!blob) {
+      const r = await fetch(MODEL_URL);
+      if (!r.ok) throw new Error('download ' + r.status);
+      const total = +r.headers.get('content-length') || 49664886;
+      const reader = r.body.getReader(); const chunks = []; let got = 0;
+      for (;;) {
+        const { done, value } = await reader.read(); if (done) break;
+        chunks.push(value); got += value.length; VOSK.pct = Math.min(99, Math.round((got / total) * 100));
+        if (S.follow === 'parole' && !S.rec) followNote(`⬇️ Preparo il riconoscimento vocale (una volta sola) ${VOSK.pct}%`);
+      }
+      blob = new Blob(chunks, { type: 'application/gzip' });
+      try { await cache?.put(MODEL_URL, new Response(blob)); } catch {}
+    }
+    if (S.follow === 'parole' && !S.rec) followNote('⚙️ Avvio il riconoscimento vocale…');
+    const url = URL.createObjectURL(blob);
+    VOSK.model = await Vosk.createModel(url, -1);
+    URL.revokeObjectURL(url);
+    if (!S.rec) followNote('');
+    return VOSK.model;
+  })().catch((e) => { VOSK.loading = null; throw e; }));
+}
+function grammarOf(text) {
+  const set = new Set();
+  for (const tok of text.replace(/^\s*[A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý0-9 .'’-]{0,24}:/gm, ' ').replace(/\([^)\n]*\)/g, ' ').toLowerCase().split(/[^a-zà-öø-ÿ0-9'’]+/)) {
+    const w = tok.replace(/’/g, "'").replace(/^'+|'+$/g, '');
+    if (!w) continue;
+    set.add(w);
+    if (w.includes("'")) w.split("'").forEach((x, i, a) => x && set.add(i < a.length - 1 ? x + "'" : x).add(x));
+  }
+  return JSON.stringify([...set, '[unk]']);
+}
 async function startFollow(R) {
-  if (!SR) { followNote('🔊 Questo browser non riconosce le parole: scorro con la voce'); return; }
   clearFollow();
-  F.pos = firstVisibleWord(); F.committed = F.pos; paintFollow();
-  F.active = true;
-  const rec = new SR();
-  rec.lang = 'it-IT'; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
-  try { // riconoscimento sul telefono, se disponibile (privacy + offline)
-    if (SR.available) {
-      const st = await SR.available({ langs: ['it-IT'], processLocally: true });
-      if (st === 'available') rec.processLocally = true;
-      else if (st === 'downloadable' && SR.install) SR.install({ langs: ['it-IT'], processLocally: true }).catch(() => {});
-    }
-  } catch {}
-  rec.onresult = (e) => {
-    let interim = [];
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const r = e.results[i], heard = r[0].transcript.split(/\s+/).map(norm).filter(Boolean);
-      if (r.isFinal) F.committed = advance(F.committed, heard); else interim.push(...heard);
-    }
-    F.pos = Math.max(F.pos, F.committed, advance(F.committed, interim));
-    paintFollow();
-    followNote('');
-  };
-  rec.onerror = (e) => {
-    if (['not-allowed', 'service-not-allowed', 'language-not-supported', 'audio-capture'].includes(e.error)) {
-      F.active = false; F.fatal = true;
-      followNote('🔊 Riconoscimento parole non disponibile: scorro con la voce');
-    } else if (e.error === 'network') followNote('📶 Serve internet per riconoscere le parole');
-  };
-  rec.onend = () => { if (F.rec === rec && F.active && !F.fatal) { try { rec.start(F.track); } catch {} } };
-  F.rec = rec; F.fatal = false;
-  F.track = R.stream.getAudioTracks()[0];
-  try { rec.start(F.track); } catch { try { rec.start(); } catch { F.active = false; followNote('🔊 Scorro con la voce'); } }
+  F.pos = firstVisibleWord(); F.committed = F.pos; F.shown = -1; paintFollow();
+  F.active = true; F.fatal = false; F.heard = [];
+  let model;
+  try {
+    if (!VOSK.model) followNote(VOSK.pct ? `⬇️ Preparo il riconoscimento ${VOSK.pct}%…` : '⚙️ Preparo il riconoscimento vocale…');
+    model = await loadVosk();
+  } catch (e) {
+    console.error(e);
+    if (S.rec !== R) return;
+    F.active = false; F.fatal = true;
+    followNote('🔊 Riconoscimento non disponibile: scorro con la voce');
+    return;
+  }
+  if (S.rec !== R) return;
+  let rec;
+  try { rec = new model.KaldiRecognizer(R.ctx.sampleRate, grammarOf(S.text.body)); }
+  catch { rec = new model.KaldiRecognizer(R.ctx.sampleRate); }
+  const words = (t) => (t || '').split(/\s+/).filter((w) => w && w !== '[unk]');
+  const show = (ws) => { if (ws.length) followNote('🎙️ ' + ws.slice(-5).join(' ')); };
+  rec.on('partialresult', (m) => {
+    if (F.rec !== rec) return;
+    const ws = words(m?.result?.partial);
+    F.pos = Math.max(F.pos, advance(F.committed, ws.map(norm).filter(Boolean)));
+    paintFollow(); show(ws);
+  });
+  rec.on('result', (m) => {
+    if (F.rec !== rec) return;
+    const ws = words(m?.result?.text);
+    F.committed = advance(F.committed, ws.map(norm).filter(Boolean));
+    F.pos = Math.max(F.pos, F.committed); F.committed = F.pos;
+    paintFollow(); show(ws);
+  });
+  const node = R.ctx.createScriptProcessor(4096, 1, 1);
+  const mute = R.ctx.createGain(); mute.gain.value = 0;
+  node.onaudioprocess = (e) => { try { if (F.rec === rec) rec.acceptWaveform(e.inputBuffer); } catch {} };
+  R.src.connect(node); node.connect(mute); mute.connect(R.ctx.destination);
+  F.rec = rec; F.node = node;
   followNote('🎯 Ti seguo: inizia a leggere');
 }
 function stopFollow() {
   const rec = F.rec; F.rec = null; F.active = false;
-  try { rec?.abort(); } catch {}
+  try { F.node?.disconnect(); } catch {}
+  F.node = null;
+  try { rec?.remove(); } catch {}
   followNote('');
 }
 function applyFollowUI() {
@@ -268,8 +317,8 @@ function applyFollowUI() {
 $('#btnFollow').onclick = () => {
   if (S.rec) return;
   S.follow = S.follow === 'parole' ? 'voce' : 'parole';
-  if (S.follow === 'parole' && !SR) { S.follow = 'voce'; followNote('Questo browser non riconosce le parole. Usa Chrome.'); setTimeout(() => followNote(''), 3000); }
-  ls.set('follow', S.follow); applyFollowUI(); clearFollow();
+  ls.set('follow2', S.follow); applyFollowUI(); clearFollow(); followNote('');
+  if (S.follow === 'parole') loadVosk().catch(() => followNote('⚠️ Non riesco a scaricare il riconoscimento: riprova con internet'));
 };
 applyFollowUI();
 
@@ -303,7 +352,7 @@ async function startRec() {
   const an = ctx.createAnalyser(); an.fftSize = 1024; src.connect(an);
   const buf = new Float32Array(an.fftSize);
   const rms = () => { an.getFloatTimeDomainData(buf); let s = 0; for (const x of buf) s += x * x; return Math.sqrt(s / buf.length); };
-  const R = (S.rec = { stream, ctx, rms, counting: true, floor: 0, samples: [] });
+  const R = (S.rec = { stream, ctx, src, rms, counting: true, floor: 0, samples: [] });
   document.body.classList.add('recording');
 
   // conto alla rovescia 3-2-1, intanto misura il rumore di fondo
@@ -335,7 +384,7 @@ async function startRec() {
     $('#level').style.transform = `translate(-50%,-50%) scale(${1 + Math.min(0.6, lv * 6)})`;
     quiet = lv > R.thr ? 0 : quiet + dt;
     const pr = $('#prompter');
-    if (F.active && F.words.length) {
+    if (S.follow === 'parole' && F.words.length && !F.fatal) {
       // segue le parole riconosciute: porta la parola corrente sulla linea verde
       const el = F.el(Math.min(F.pos, F.words.length - 1));
       if (el) { const target = el.offsetTop - pr.clientHeight * 0.28 + el.offsetHeight * 0.2; pr.scrollTop += (target - pr.scrollTop) * Math.min(1, dt * 5); }
@@ -704,5 +753,6 @@ applyPrefs();
 const texts = await ensureSeeds();
 const curId = ls.get('cur', null);
 await selectText(texts.find((t) => t.id === curId)?.id || texts.sort((a, b) => b.lastUsed - a.lastUsed)[0].id);
+if (S.follow === 'parole') setTimeout(() => loadVosk().catch((e) => console.warn('vosk', e)), 1500);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 checkInbox();
