@@ -686,7 +686,7 @@ function takeRow(k, title) {
     <button class="act play" data-play="${k.id}">▶</button>
     <div class="main"><b>${title ? esc(title) + ' · ' : ''}Take ${k.n}</b>
       <small>${fmt(k.duration)} · ${k.mode === 'fuori' ? '🌳 fuori' : '🏠 casa'} · ${d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} ${d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</small></div>
-    <button class="act coach" data-coach="${k.id}">🧠${k.coach?.ai ? `<sup>${k.coach.ai.errori.length}</sup>` : ''}</button>
+    <button class="act coach" data-coach="${k.id}">🧠${k.coach?.count != null ? `<sup>${k.coach.count}</sup>` : ''}</button>
     <button class="act ${k.starred ? 'on' : ''}" data-star="${k.id}">${k.starred ? '★' : '☆'}</button>
     <button class="act" data-dl="${k.id}">⬇️</button>
     <button class="act" data-rm="${k.id}">🗑️</button>
@@ -1544,10 +1544,10 @@ async function localAnalysis(take, text) {
     else if (!at(i)) {
       const last = R.miss.at(-1);
       const tPrev = (() => { for (let q = i - 1; q >= 0; q--) if (at(q)) return at(q).e; return 0; })();
-      if (last && last.i1 === i - 1) { last.ref += ' ' + t.w; last.i1 = i; } else R.miss.push({ ref: t.w, t: +tPrev.toFixed(2), i1: i });
+      if (last && last.i1 === i - 1) { last.ref += ' ' + t.w; last.i1 = i; } else R.miss.push({ ref: t.w, t: +tPrev.toFixed(2), i0: i, i1: i });
     }
   });
-  R.miss.forEach((m) => delete m.i1);
+  R.times = ref.toks.map((_, i) => (at(i) ? +at(i).s.toFixed(2) : null));
   R.ins = fp.ins.map((k) => ({ heard: free[k].w, t: free[k].s })).slice(0, 12);
   // 3. velocità e pause
   const hit = ref.toks.map((_, i) => at(i)).filter(Boolean);
@@ -1560,8 +1560,8 @@ async function localAnalysis(take, text) {
   ref.toks.forEach((t, i) => {
     const a = at(i), b = at(i + 1); if (!a || !b) return;
     const gap = +(b.s - a.e).toFixed(2);
-    if (t.pz) { const need = t.pz > 1 ? 0.55 : 0.22; if (gap < need) R.pauseMissed.push({ w: t.w, t: a.e, gap, need }); }
-    else if (gap > 0.75 && !/[.,;:!?…»"]$/.test(t.w) && t.line === ref.toks[i + 1].line) R.pauseExtra.push({ w: t.w, t: a.e, gap });
+    if (t.pz) { const need = t.pz > 1 ? 0.55 : 0.22; if (gap < need) R.pauseMissed.push({ w: t.w, t: a.e, gap, need, i }); }
+    else if (gap > 0.75 && !/[.,;:!?…»"]$/.test(t.w) && t.line === ref.toks[i + 1].line) R.pauseExtra.push({ w: t.w, t: a.e, gap, i });
   });
   // 4. intonazione e cadenza
   const f0 = pitchTrack(pcm);
@@ -1578,8 +1578,8 @@ async function localAnalysis(take, text) {
       if (f.length < 6) return;
       const k = Math.max(2, Math.floor(f.length * 0.35));
       const slope = avg(f.slice(-k)) - avg(f.slice(0, k));
-      if (/\?["»]?$/.test(t.w)) { if (slope < 0.8) R.flatQ.push({ w: t.w, t: a.s, slope: +slope.toFixed(1) }); }
-      else if (slope > 2) R.rising.push({ w: t.w, t: a.s, slope: +slope.toFixed(1) });
+      if (/\?["»]?$/.test(t.w)) { if (slope < 0.8) R.flatQ.push({ w: t.w, t: a.s, slope: +slope.toFixed(1), i }); }
+      else if (slope > 2) R.rising.push({ w: t.w, t: a.s, slope: +slope.toFixed(1), i });
     });
   }
   // 5. volume
@@ -1619,15 +1619,16 @@ const COACH_SCHEMA = {
   type: 'OBJECT',
   properties: {
     sintesi: { type: 'STRING' },
-    priorita: { type: 'STRING' },
+    prima_cosa: { type: 'STRING' },
     errori: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
-      tipo: { type: 'STRING', enum: ['accento_tonico', 'vocale_aperta_chiusa', 's_z', 'consonanti', 'doppie', 'parola_sbagliata', 'parola_saltata', 'parola_aggiunta', 'ritmo_pause', 'intonazione_cadenza', 'interpretazione', 'sync', 'tecnica_voce'] },
-      parola: { type: 'STRING' }, secondo: { type: 'NUMBER' }, hai_detto: { type: 'STRING' }, va_detto: { type: 'STRING' },
-      gravita: { type: 'INTEGER' }, certezza: { type: 'STRING', enum: ['alta', 'media', 'bassa'] }, esercizio: { type: 'STRING' } },
-      required: ['tipo', 'parola', 'gravita', 'certezza', 'va_detto', 'esercizio'] } },
+      parola: { type: 'STRING' }, contesto: { type: 'STRING' },
+      tipo: { type: 'STRING', enum: ['pronuncia', 'accento', 'pausa_mancante', 'pausa_di_troppo', 'parola_saltata', 'parola_sbagliata', 'intonazione', 'ritmo', 'interpretazione', 'voce'] },
+      spiegazione: { type: 'STRING' }, prova: { type: 'STRING' }, secondo: { type: 'NUMBER' },
+      gravita: { type: 'INTEGER' }, certezza: { type: 'STRING', enum: ['alta', 'media', 'bassa'] } },
+      required: ['parola', 'tipo', 'spiegazione', 'gravita', 'certezza'] } },
     miglioramenti: { type: 'ARRAY', items: { type: 'STRING' } },
   },
-  required: ['sintesi', 'priorita', 'errori', 'miglioramenti'],
+  required: ['sintesi', 'prima_cosa', 'errori', 'miglioramenti'],
 };
 function dizHints(text) {
   const seen = new Set(), out = [];
@@ -1640,18 +1641,24 @@ function dizHints(text) {
   return out.slice(0, 80);
 }
 function coachPrompt(L, prev) {
-  const local = { ...L.R }; delete local.heard;
-  return `Sei un insegnante italiano di dizione, lettura espressiva e doppiaggio. Stile: SERGENTE. L'allievo vuole lavorare come doppiatore e voce professionista e vuole sentirsi dire la verità.
+  const local = { ...L.R }; delete local.heard; delete local.times;
+  return `Sei un insegnante italiano di dizione, lettura espressiva e doppiaggio. Stile: SERGENTE, cioè severo e diretto, ma parli in modo SEMPLICE, come a voce. L'allievo vuole lavorare come doppiatore e voce professionista e vuole sentirsi dire la verità.
 
 Ascolta la registrazione allegata e confrontala con il TESTO DI RIFERIMENTO.
 
 REGOLE
-1. Elenca TUTTI gli errori, anche piccoli, ordinati dal più grave. Nessun complimento di cortesia, nessun incoraggiamento generico.
-2. Pronuncia secondo la DIZIONE ITALIANA STANDARD (non regionale): accento tonico sulla sillaba giusta, vocali aperte/chiuse (è/é, ò/ó), s e z sorde/sonore, doppie, consonanti nette. Ogni inflessione o cadenza regionale è un errore.
-3. Per ogni errore: la parola, il secondo dall'inizio della registrazione, cosa ha detto (scritto come si sente, con l'accento grafico), come va detto (con l'accento grafico corretto, es. "pèsca", "rùbrica"), gravità 1-3 (3 = grave), certezza (alta/media/bassa: se non sei sicuro dillo, non inventare) e un esercizio concreto per correggerlo.
-4. Valuta anche ritmo, pause, intonazione/cadenza e interpretazione rispetto al genere: ${L.ref.genre}.
-5. "miglioramenti": SOLO errori della volta precedente (elenco in fondo) che ora sono spariti. Se non c'è una volta precedente o nulla è migliorato, lista vuota.
-6. "priorita": la UNA cosa da correggere per prima. "sintesi": una frase secca e onesta.
+1. Segnala TUTTI gli errori veri, anche piccoli. Nessun complimento di cortesia. Non segnalare come errore una parola detta bene.
+2. Pronuncia secondo la DIZIONE ITALIANA STANDARD (non regionale): accento tonico, vocali aperte/chiuse (è/é, ò/ó), s e z sorde/sonore, doppie, consonanti nette. Ogni inflessione regionale è un errore.
+3. Per ogni errore:
+   - "parola": la parola (o al massimo 4 parole) ESATTAMENTE come è scritta nel testo;
+   - "contesto": le 2-3 parole che la PRECEDONO nel testo (serve a trovarla se è ripetuta);
+   - "spiegazione": UNA frase semplice, in seconda persona, massimo 18 parole, senza termini tecnici, senza secondi e senza numeri. Esempi: «La e va chiusa: «vedérti», non «vedèrti».» · «Qui dovevi fermarti un attimo.» · «La r non vibra: sembra quasi una l.» · «Accento sbagliato: si dice «rùbrica», non «rubrìca».»
+   - "prova": un esercizio brevissimo per correggerlo (facoltativo, massimo 15 parole);
+   - "secondo": il secondo dall'inizio della registrazione in cui succede;
+   - "gravita" 1-3 (3 = grave); "certezza" alta/media/bassa (se non sei sicuro dillo, non inventare).
+4. Valuta anche pause, ritmo, intonazione/cadenza e interpretazione rispetto al genere: ${L.ref.genre}. Per problemi che riguardano tutta la lettura (es. voce monotona) metti in "parola" la prima parola del pezzo interessato.
+5. "miglioramenti": SOLO errori della volta precedente (elenco in fondo) che ora sono spariti, scritti in modo semplice. Altrimenti lista vuota.
+6. "sintesi": una frase secca e semplice sul risultato. "prima_cosa": la UNA cosa da correggere per prima, in poche parole.
 7. Usa le MISURE OGGETTIVE (calcolate sull'audio): non contraddirle.
 8. Rispondi in italiano.
 
@@ -1671,7 +1678,23 @@ PROBLEMI NOTI DELL'ALLIEVO (controllali in modo mirato, segnalali ogni volta che
 ${(ls.get('coachNotes', []) || []).map((n) => '- ' + n).join('\n') || '(nessuno)'}
 
 ERRORI DELLA VOLTA PRECEDENTE SU QUESTO TESTO:
-${prev?.length ? prev.map((e) => `- ${e.tipo}: ${e.parola} → ${e.va_detto}`).join('\n') : '(nessuna volta precedente)'}`;
+${prev?.length ? prev.map((e) => `- «${e.parola}»: ${e.spiegazione || e.va_detto || ''}`).join('\n') : '(nessuna volta precedente)'}`;
+}
+// uniforma risposte vecchie e nuove, scarta quelle senza senso
+function cleanAI(ai) {
+  const n2 = (x) => norm(x || '');
+  ai.errori = (ai.errori || []).map((e) => {
+    let spiegazione = e.spiegazione;
+    if (!spiegazione && e.va_detto) {
+      if (e.hai_detto && n2(e.hai_detto) === n2(e.va_detto) && e.hai_detto.trim() === e.va_detto.trim()) return null;
+      spiegazione = e.hai_detto ? `Si dice «${e.va_detto}», non «${e.hai_detto}».` : e.va_detto;
+    }
+    if (!spiegazione || !e.parola) return null;
+    return { ...e, spiegazione, prova: e.prova || e.esercizio || '' };
+  }).filter(Boolean);
+  ai.prima_cosa = ai.prima_cosa || ai.priorita || '';
+  ai.miglioramenti = ai.miglioramenti || [];
+  return ai;
 }
 async function geminiCoach(L, prev) {
   const key = COACH.key; if (!key) return null;
@@ -1689,10 +1712,7 @@ async function geminiCoach(L, prev) {
     const js = await r.json();
     const txt = js.candidates?.[0]?.content?.parts?.map((x) => x.text || '').join('') || '';
     bumpCoachCount();
-    const ai = JSON.parse(txt);
-    ai.errori = (ai.errori || []).sort((a, b) => (b.gravita || 0) - (a.gravita || 0));
-    ai.miglioramenti = ai.miglioramenti || [];
-    return { ...ai, model };
+    return { ...cleanAI(JSON.parse(txt)), model };
   }
   throw lastErr || new Error('Gemini non disponibile');
 }
@@ -1710,6 +1730,7 @@ async function runCoach(takeId, force) {
     else coach.aiError = 'nessuna chiave Gemini';
     const fresh = await DB.get('takes', takeId); if (!fresh) return;
     fresh.coach = coach;
+    const v = coachView(fresh, text); coach.count = v.items.length + v.general.length;
     await DB.put('takes', fresh);
     if (S.lastTake?.id === takeId) S.lastTake.coach = coach;
     return coach;
@@ -1723,62 +1744,117 @@ function coachQueue(takeId) { COACH.queue = COACH.queue.then(() => runCoach(take
 function paintCoachBtn() {
   const b = $('#ttCoach'); if (!b || !S.lastTake) return;
   const busy = COACH.running.has(S.lastTake.id);
-  const n = S.lastTake.coach?.ai?.errori?.length;
+  const n = S.lastTake.coach?.count;
   b.textContent = busy ? '🧠 …' : n != null ? `🧠 ${n}` : '🧠';
   b.classList.toggle('busy', busy);
 }
-const TIPI = { accento_tonico: '🎯 Accento tonico', vocale_aperta_chiusa: '👄 Vocale aperta/chiusa', s_z: '🐍 S / Z', consonanti: '🔤 Consonanti', doppie: '✌️ Doppie',
-  parola_sbagliata: '❌ Parola sbagliata', parola_saltata: '⏭️ Parola saltata', parola_aggiunta: '➕ Parola aggiunta', ritmo_pause: '⏱️ Ritmo e pause',
-  intonazione_cadenza: '🎼 Intonazione / cadenza', interpretazione: '🎭 Interpretazione', sync: '👄 Sync', tecnica_voce: '🎙️ Tecnica vocale' };
-const mmss = (x) => (x == null ? '' : `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, '0')}`);
 const dec = (x, d = 1) => String(+x.toFixed(d)).replace('.', ',');
-function localFindings(R) {
-  const out = [];
-  if (R.coverage != null && R.coverage < 95) out.push(['⏭️', `Hai detto solo il ${R.coverage}% del testo.`]);
-  for (const m of (R.miss || []).slice(0, 6)) out.push(['⏭️', `${m.ref.includes(' ') ? 'Saltato' : 'Saltata'}: «${m.ref}»`, m.t]);
-  for (const x of (R.subs || []).slice(0, 8)) out.push(['❓', `«${x.ref}» → ho sentito «${x.heard}» (da verificare)`, x.t]);
-  for (const x of (R.pauseMissed || []).slice(0, 6)) out.push(['⏱️', `Pausa ${x.need > 0.5 ? 'lunga' : 'breve'} non fatta dopo «${x.w}» (${dec(x.gap, 2)} s)`, x.t]);
-  for (const x of (R.pauseExtra || []).slice(0, 6)) out.push(['⏱️', `Pausa non prevista dopo «${x.w}» (${dec(x.gap)} s)`, x.t]);
-  for (const x of (R.rising || []).slice(0, 6)) out.push(['🎼', `Fine frase che sale su «${x.w}»: suona come una domanda o come una cadenza regionale`, x.t]);
-  for (const x of (R.flatQ || []).slice(0, 4)) out.push(['🎼', `Domanda che non sale su «${x.w}»`, x.t]);
-  if (R.pitchRange != null && R.pitchRange < 4) out.push(['🎼', `Voce monotona: escursione di soli ${dec(R.pitchRange)} semitoni (punta ad almeno 5-6)`]);
-  if (R.clip) out.push(['🎙️', 'Audio distorto (saturazione): allontanati dal microfono o abbassa il guadagno']);
-  else if (R.peakDb != null && R.peakDb < -18) out.push(['🎙️', `Volume basso (picco ${R.peakDb} dB): avvicinati al microfono`]);
-  return out;
+
+// «Penna rossa»: errori agganciati alle parole del testo
+function coachView(take, text) {
+  const c = take.coach || {}, R = c.local || {}, ai = c.ai;
+  const ref = refFor(take, text), toks = ref.toks, times = R.times || [];
+  const items = [], general = [];
+  const taken = new Set();
+  const add = (it) => {
+    const key = `${it.kind}:${it.i1}`;
+    if (taken.has(key)) return;
+    taken.add(key); items.push(it);
+  };
+  const tAt = (i, fallback) => (times[i] != null ? times[i] : fallback ?? null);
+  const find = (parola, contesto, sec) => {
+    const pw = String(parola || '').split(/\s+/).map(norm).filter(Boolean).slice(0, 6);
+    if (!pw.length) return null;
+    const cands = [];
+    for (let i = 0; i + pw.length <= toks.length; i++) {
+      let ok = true;
+      for (let k = 0; k < pw.length; k++) if (toks[i + k].n !== pw[k] && !similar(toks[i + k].n, pw[k])) { ok = false; break; }
+      if (ok) cands.push(i);
+    }
+    if (!cands.length) return null;
+    const ctx = String(contesto || '').split(/\s+/).map(norm).filter(Boolean);
+    const score = (i) => {
+      let s = 0;
+      for (const w of ctx) for (let q = Math.max(0, i - 5); q < i; q++) if (toks[q].n === w) s += 2;
+      if (sec != null && times[i] != null) s -= Math.abs(times[i] - sec) / 3;
+      return s;
+    };
+    const best = cands.sort((a, b) => score(b) - score(a))[0];
+    return { i0: best, i1: best + pw.length - 1 };
+  };
+  if (ai) for (const e of ai.errori) {
+    const pos = find(e.parola, e.contesto, e.secondo);
+    const unsure = e.certezza === 'bassa';
+    const msg = unsure ? 'Forse ' + e.spiegazione.charAt(0).toLowerCase() + e.spiegazione.slice(1) : e.spiegazione;
+    if (!pos) { if (['intonazione', 'ritmo', 'interpretazione', 'voce'].includes(e.tipo)) general.push({ msg, prova: e.prova, t: e.secondo ?? null }); continue; } // parola non presente nel testo: abbaglio
+    const kind = e.tipo === 'pausa_mancante' ? 'pause' : e.tipo === 'parola_saltata' ? 'skip' : 'word';
+    if (kind === 'pause' && toks[pos.i1]?.pz && times[pos.i1] != null && times[pos.i1 + 1] != null && !(R.pauseMissed || []).some((p) => p.i === pos.i1)) continue; // il telefono ha misurato la pausa: non è un errore
+    add({ ...pos, kind, msg, prova: e.prova, t: tAt(pos.i0, e.secondo) });
+  }
+  for (const m of R.miss || []) if (m.i0 != null) add({ i0: m.i0, i1: m.i1, kind: 'skip', msg: m.i1 > m.i0 ? 'Hai saltato queste parole.' : 'Hai saltato questa parola.', t: m.t });
+  for (const p of R.pauseMissed || []) if (p.i != null) add({ i0: p.i, i1: p.i, kind: 'pause', msg: p.need > 0.5 ? 'Qui serviva una pausa lunga: respira prima di ripartire.' : 'Qui dovevi fermarti un attimo.', t: tAt(p.i, p.t) });
+  for (const p of R.pauseExtra || []) if (p.i != null) add({ i0: p.i, i1: p.i, kind: 'word', msg: 'Qui ti sei fermato senza motivo: la frase va detta tutta di seguito.', t: tAt(p.i, p.t) });
+  for (const p of R.rising || []) if (p.i != null) add({ i0: p.i, i1: p.i, kind: 'word', msg: 'Qui la voce sale come in una domanda: a fine frase deve scendere.', t: tAt(p.i, p.t) });
+  for (const p of R.flatQ || []) if (p.i != null) add({ i0: p.i, i1: p.i, kind: 'word', msg: 'È una domanda: alla fine la voce deve salire.', t: tAt(p.i, p.t) });
+  if (R.pitchRange != null && R.pitchRange < 4) general.push({ msg: 'Voce troppo piatta: fai salire e scendere di più la voce.' });
+  if (R.clip) general.push({ msg: 'Audio distorto: allontanati un po\' dal microfono.' });
+  else if (R.peakDb != null && R.peakDb < -18) general.push({ msg: 'Volume basso: avvicinati al microfono.' });
+  items.sort((a, b) => a.i0 - b.i0 || a.i1 - b.i1);
+  items.forEach((it, k) => (it.n = k + 1));
+  return { toks, items, general };
 }
 async function openCoach(takeId) {
   const take = await DB.get('takes', takeId); if (!take) return;
   COACH.showing = takeId;
-  renderCoach(take);
+  await renderCoach(take);
   open('#sheetCoach');
+  $('#sheetCoach').scrollTop = 0;
   if (!take.coach && !COACH.running.has(takeId)) { runCoach(takeId); renderCoach(take); }
 }
-function renderCoach(take) {
-  const c = take.coach, R = c?.local, ai = c?.ai;
+async function renderCoach(take) {
+  const c = take.coach, ai = c?.ai, R = c?.local || {};
   const busy = COACH.running.has(take.id);
+  const text = await DB.get('texts', take.textId);
   let h = '';
-  if (!c) h = `<div class="empty-note">${busy ? '🧠 Ascolto la registrazione con attenzione…' : 'Nessuna analisi ancora.'}</div>`;
+  if (!c || !text) h = `<div class="empty-note">${busy ? '🧠 Ti sto ascoltando con attenzione…' : 'Nessuna analisi ancora.'}</div>`;
   else {
-    if (ai) {
-      h += `<div class="co-sum"><b>${esc(ai.sintesi || '')}</b>${ai.priorita ? `<div class="co-pri">🎯 Prima di tutto: ${esc(ai.priorita)}</div>` : ''}</div>`;
-      h += `<h4 class="co-h">Errori (${ai.errori.length})</h4>`;
-      h += ai.errori.map((e) => `<div class="co-err g${Math.min(3, Math.max(1, e.gravita || 1))}">
-        <div class="co-top"><span>${TIPI[e.tipo] || esc(e.tipo || '')}</span>${e.secondo != null ? `<button class="co-t" data-at="${+e.secondo}">▶ ${mmss(+e.secondo)}</button>` : ''}</div>
-        <div class="co-w">«${esc(e.parola || '')}»${e.hai_detto ? ` <span class="co-bad">hai detto: ${esc(e.hai_detto)}</span>` : ''}</div>
-        <div class="co-ok">va detto: <b>${esc(e.va_detto || '')}</b>${e.certezza && e.certezza !== 'alta' ? ` <i class="co-unc">certezza ${esc(e.certezza)}</i>` : ''}</div>
-        ${e.esercizio ? `<div class="co-ex">💪 ${esc(e.esercizio)}</div>` : ''}</div>`).join('') || '<div class="empty-note">Nessun errore trovato su questa take.</div>';
-      if (ai.miglioramenti?.length) h += `<h4 class="co-h">Migliorato rispetto alla volta scorsa</h4>` + ai.miglioramenti.map((m) => `<div class="co-imp">✓ ${esc(m)}</div>`).join('');
-    } else if (c.aiError) {
-      h += `<div class="co-warn">${COACH.key ? `Coach AI non disponibile (${esc(c.aiError)}).` : 'Coach AI spento: inserisci la chiave Gemini in ⚙️ Impostazioni per il giudizio su accenti, vocali e interpretazione.'} Qui sotto trovi le misure fatte sul telefono.</div>`;
+    const { toks, items, general } = coachView(take, text);
+    const verdict = ai ? esc(ai.sintesi || '') : items.length || general.length ? `Ho trovato ${items.length + general.length} cose da sistemare.` : 'Non ho trovato errori misurabili.';
+    h += `<div class="pr-verdict">${verdict}${ai?.prima_cosa ? ` <b>Prima cosa: ${esc(ai.prima_cosa)}</b>` : ''}</div>`;
+    if (!ai) h += `<div class="pr-note">${COACH.key ? `Il coach AI non ha risposto (${esc(c.aiError || '')}): qui vedi solo quello che misura il telefono.` : 'Per il giudizio su accenti e vocali aperte/chiuse inserisci la chiave Gemini in ⚙️ Impostazioni.'}</div>`;
+    if (items.length) {
+      // testo con la penna rossa: solo le righe con errori (tutte se il testo è corto)
+      const byLine = {};
+      toks.forEach((t, i) => (byLine[t.line] ||= []).push(i));
+      const lines = Object.keys(byLine).map(Number).sort((a, b) => a - b);
+      const hot = new Set(items.flatMap((it) => [toks[it.i0]?.line, toks[it.i1]?.line]));
+      const showAll = toks.length <= 60;
+      const markAt = {}; items.forEach((it) => { for (let q = it.i0; q <= it.i1; q++) (markAt[q] ||= []).push(it); });
+      let paper = '', gap = false;
+      for (const L of lines) {
+        if (!showAll && !hot.has(L)) { if (!gap) paper += '<span class="pr-gap">…</span><br>'; gap = true; continue; }
+        gap = false;
+        paper += byLine[L].map((i) => {
+          const ms = markAt[i] || [];
+          const w = esc(toks[i].w);
+          let s = ms.length ? `<span class="pr-mk${ms.some((m) => m.kind === 'skip') ? ' skip' : ''}">${w}</span>` : w;
+          for (const m of ms.filter((m) => m.i1 === i)) s += `<span class="pr-n">${m.n}</span>${m.kind === 'pause' ? '<span class="pr-stop">‖</span>' : ''}`;
+          return s;
+        }).join(' ') + '<br>';
+      }
+      h += `<div class="pr-paper">${paper}</div>`;
+      h += `<div class="pr-notes">` + items.map((it) => `<div class="pr-item"><span class="pr-n big">${it.n}</span><div>
+        <div class="pr-msg">${esc(it.msg)}</div>${it.prova ? `<div class="pr-try">Prova: ${esc(it.prova)}</div>` : ''}
+        ${it.t != null ? `<button class="pr-play" data-at="${it.t}">▶ Riascoltati</button>` : ''}</div></div>`).join('') + `</div>`;
     }
-    const lf = localFindings(R || {});
-    h += `<h4 class="co-h">Misure sul telefono</h4><div class="co-m">${R?.wpm ? `<span>⏱️ ${R.wpm} parole/min</span>` : ''}${R?.pitchRange != null ? `<span>🎼 ${dec(R.pitchRange)} semitoni</span>` : ''}${R?.peakDb != null ? `<span>🎙️ picco ${R.peakDb} dB</span>` : ''}</div>`;
-    h += lf.map(([i, t2, at2]) => `<div class="co-lf">${i} ${esc(t2)}${at2 != null ? ` <button class="co-t" data-at="${at2}">▶ ${mmss(at2)}</button>` : ''}</div>`).join('') || '<div class="co-lf">Nessun problema misurabile.</div>';
-    if (ai?.model) h += `<small class="hint">Analisi: ${esc(ai.model)} · ${coachCount()} oggi</small>`;
+    if (general.length) h += `<div class="pr-notes">` + general.map((g) => `<div class="pr-item"><span class="pr-n big dot">•</span><div><div class="pr-msg">${esc(g.msg)}</div>${g.prova ? `<div class="pr-try">Prova: ${esc(g.prova)}</div>` : ''}${g.t != null ? `<button class="pr-play" data-at="${g.t}">▶ Riascoltati</button>` : ''}</div></div>`).join('') + `</div>`;
+    if (ai?.miglioramenti?.length) h += `<div class="pr-better"><b>Migliorato dalla volta scorsa</b>${ai.miglioramenti.map((m) => `<div>✓ ${esc(m)}</div>`).join('')}</div>`;
+    h += `<details class="pr-tech"><summary>Dettagli tecnici</summary><div>${R.wpm ? `${R.wpm} parole al minuto · ` : ''}${R.pitchRange != null ? `escursione voce ${dec(R.pitchRange)} semitoni · ` : ''}${R.peakDb != null ? `picco ${R.peakDb} dB` : ''}${ai?.model ? `<br>Analisi: ${esc(ai.model)} · ${coachCount()} oggi` : ''}</div></details>`;
   }
   h += `<div class="co-actions"><button class="cta small" id="coAsk">💬 Chiedi al coach</button><button class="cta small ghost" id="coRedo">${busy ? 'Analisi in corso…' : '🔄 Rifai'}</button></div>`;
   $('#coachBody').innerHTML = h;
   $('#coachBody').dataset.take = take.id;
+  $('#coachSub').textContent = text ? `${text.title}${take.anello != null ? ` · anello ${take.anello + 1}` : ''}` : '';
 }
 $('#coachBody').addEventListener('click', async (e) => {
   const id = $('#coachBody').dataset.take;
@@ -1828,7 +1904,7 @@ async function recentErrors() {
   const since = Date.now() - 14 * 86400000;
   const ks = (await DB.all('takes')).filter((k) => k.createdAt > since && k.coach?.ai?.errori?.length);
   const by = {};
-  for (const k of ks) for (const e of k.coach.ai.errori) { const key = `${e.tipo}: ${e.parola} → ${e.va_detto}`; by[key] = (by[key] || 0) + 1; }
+  for (const k of ks) for (const e of k.coach.ai.errori) { const key = `«${e.parola}»: ${e.spiegazione || e.va_detto || ''}`; by[key] = (by[key] || 0) + 1; }
   return Object.entries(by).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([k, n]) => `- ${k}${n > 1 ? ` (×${n})` : ''}`).join('\n') || '(nessuna analisi recente)';
 }
 async function chatSystem() {

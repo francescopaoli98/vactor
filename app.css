@@ -376,3 +376,28 @@ dialog.sheet.chat[open]{display:flex}
 .chat-send{background:var(--neon);color:#04140c;border:0;font-weight:600}
 .chat-send:disabled{opacity:.4}
 .chat-mic.on{background:var(--rec);color:#fff;border:0}
+
+/* report del coach «penna rossa» */
+.sheet-head.sticky{position:sticky;top:-18px;z-index:2;background:#08120e;margin:-18px -16px 12px;padding:16px 16px 10px;border-bottom:1px solid var(--line)}
+.co-sub{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+.pr-verdict{font-size:16px;line-height:1.5;margin:4px 0 14px}
+.pr-verdict b{font-weight:500;color:var(--lime)}
+.pr-note{font-size:13px;color:var(--muted);margin:-6px 0 14px;line-height:1.45}
+.pr-paper{padding:14px 16px;border-radius:16px;background:var(--panel);border:1px solid var(--line);font-size:17px;line-height:2}
+.pr-mk{color:#ff7a96;text-decoration:underline wavy #ff6b8b;text-decoration-thickness:1px;text-underline-offset:5px}
+.pr-mk.skip{text-decoration:line-through #ff6b8b 2px}
+.pr-n{display:inline-grid;place-items:center;min-width:19px;height:19px;padding:0 4px;border-radius:99px;background:#ff6b8b;color:#1a0509;font-size:11px;font-weight:600;vertical-align:super;margin-left:2px;line-height:1}
+.pr-n.big{vertical-align:baseline;min-width:24px;height:24px;font-size:13px;margin:1px 0 0;flex:none}
+.pr-n.dot{background:#ffffff1a;color:var(--muted)}
+.pr-stop{color:#ff6b8b;font-weight:600;margin:0 2px}
+.pr-gap{color:var(--muted)}
+.pr-notes{display:flex;flex-direction:column;gap:14px;margin-top:16px}
+.pr-item{display:flex;gap:12px}
+.pr-msg{font-size:15px;line-height:1.5}
+.pr-try{font-size:14px;color:var(--muted);margin-top:2px;line-height:1.45}
+.pr-play{margin-top:6px;font-size:13px;color:var(--neon);border:1px solid var(--line2);padding:4px 11px;border-radius:99px}
+.pr-better{margin-top:18px;padding:12px 14px;border-radius:14px;background:#2bff8a0d;border:1px solid var(--line);font-size:14px;line-height:1.6;color:var(--neon)}
+.pr-better b{display:block;font-weight:500;color:var(--text);margin-bottom:2px}
+.pr-tech{margin-top:16px;font-size:13px;color:var(--muted)}
+.pr-tech summary{cursor:pointer}
+.pr-tech div{margin-top:6px;line-height:1.6}
