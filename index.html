@@ -9,15 +9,16 @@
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 <div id="app">
   <header class="top">
     <div class="logo"><span class="logo-v">V</span>Actor</div>
-    <button class="routine-btn" id="btnRoutine">▶ Allenamento 10'</button>
+    <button class="routine-btn" id="btnRoutine">▶ Allenati</button>
     <div class="top-actions">
+      <button class="icon-btn" id="btnChat" aria-label="Parla con il coach">💬</button>
       <button class="icon-btn" id="btnArchive" aria-label="Archivio">🗂️</button>
       <button class="icon-btn" id="btnSettings" aria-label="Impostazioni">⚙️</button>
     </div>
@@ -150,6 +151,20 @@
   <div id="coachBody"></div>
 </dialog>
 
+<!-- CHAT COACH -->
+<dialog class="sheet chat" id="sheetChat">
+  <div class="sheet-head"><h2>Coach</h2><div><button class="link" id="chatClear">cancella chat</button> <button class="x" data-close>✕</button></div></div>
+  <div class="chat-notes" id="chatNotes"></div>
+  <div class="chat-list" id="chatList"></div>
+  <div class="chat-ctx" id="chatCtx" hidden>Stai parlando dell'ultima take analizzata</div>
+  <div class="chat-att" id="chatAtt" hidden></div>
+  <div class="chat-bar">
+    <button class="chat-mic" id="chatMic" aria-label="Registra un messaggio vocale">🎙️</button>
+    <textarea id="chatIn" rows="1" placeholder="Es. sento che apro troppo le e…"></textarea>
+    <button class="chat-send" id="chatSend" aria-label="Invia">➤</button>
+  </div>
+</dialog>
+
 <!-- IMPOSTAZIONI -->
 <dialog class="sheet" id="sheetSettings">
   <div class="sheet-head"><h2>Impostazioni</h2><button class="x" data-close>✕</button></div>
@@ -163,6 +178,10 @@
     <a class="cal-link" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">🔑 Crea la chiave gratuita su Google AI Studio ›</a>
     <div class="key-row"><input class="in" id="gkey" type="password" autocomplete="off" placeholder="Incolla qui la chiave (AIza…)"><button class="cta small" id="gkeySave">Salva</button></div>
     <label class="day on"><span>Analizza ogni take in automatico</span><input type="checkbox" id="coachAuto"></label>
+    <div class="seg2">
+      <label><input type="radio" name="coachModel" value="lite"><span><b>Leggero</b><small>~500 al giorno · più veloce</small></span></label>
+      <label><input type="radio" name="coachModel" value="flash"><span><b>Migliore</b><small>~20 al giorno · sente più sfumature</small></span></label>
+    </div>
     <div class="co-info"><span id="coachInfo"></span> <button class="link" id="gkeyDel">rimuovi chiave</button></div>
   </div>
   <div class="field soon">☁️ Copia su Google Drive <span class="pill">prossima fase</span></div>

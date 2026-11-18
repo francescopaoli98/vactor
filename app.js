@@ -1266,7 +1266,7 @@ function routineDone() { const log = ls.get('routineLog', {}); return !!log[dayK
 function paintRoutineBtn() {
   const b = $('#btnRoutine');
   const done = routineDone();
-  b.textContent = done ? '✓ Fatto oggi' : "▶ Allenamento 10'";
+  b.textContent = done ? '✓ Fatto oggi' : '▶ Allenati';
   b.classList.toggle('done', done);
 }
 function paintBar() {
@@ -1472,7 +1472,7 @@ $('#btnCal').onclick = () => {
 renderDays();
 
 /* ---------- Fase 4: coach «Sergente» ---------- */
-const COACH = { key: ls.get('gkey', ''), auto: ls.get('coachAuto', true), queue: Promise.resolve(), running: new Set(), showing: null };
+const COACH = { key: ls.get('gkey', ''), auto: ls.get('coachAuto', true), model: ls.get('coachModel', 'lite'), queue: Promise.resolve(), running: new Set(), showing: null };
 const GAPI = 'https://generativelanguage.googleapis.com/v1beta';
 const coachCount = () => (ls.get('coachCount', {})[dayKey()] || 0);
 function bumpCoachCount() { const c = ls.get('coachCount', {}); c[dayKey()] = (c[dayKey()] || 0) + 1; ls.set('coachCount', c); }
@@ -1600,7 +1600,8 @@ function wavBase64(pcm) {
 }
 async function geminiModels(key) {
   const cached = ls.get('gmodels', null);
-  if (cached && cached.day === dayKey() && cached.k === key.slice(-6)) return cached.list;
+  const order = (x) => (COACH.model === 'flash' ? [...x.full, ...x.lite] : [...x.lite, ...x.full]);
+  if (cached && cached.day === dayKey() && cached.k === key.slice(-6) && cached.full) return order(cached);
   const r = await fetch(`${GAPI}/models?pageSize=200`, { headers: { 'x-goog-api-key': key } });
   if (!r.ok) throw new Error(r.status === 400 || r.status === 403 ? 'Chiave non valida' : 'Google non risponde (' + r.status + ')');
   const js = await r.json();
@@ -1610,9 +1611,9 @@ async function geminiModels(key) {
   const byVer = (a, b) => ver(b) - ver(a) || a.length - b.length;
   const full = ok.filter((n) => !/lite/.test(n)).sort(byVer);
   const lite = ok.filter((n) => /lite/.test(n)).sort(byVer);
-  const list = [...full.slice(0, 2), ...lite.slice(0, 2)];
-  ls.set('gmodels', { day: dayKey(), k: key.slice(-6), list });
-  return list;
+  const x = { day: dayKey(), k: key.slice(-6), full: full.slice(0, 2), lite: lite.slice(0, 2) };
+  ls.set('gmodels', x);
+  return order(x);
 }
 const COACH_SCHEMA = {
   type: 'OBJECT',
@@ -1665,6 +1666,9 @@ ${JSON.stringify(local)}
 
 QUELLO CHE HA SENTITO IL RICONOSCITORE AUTOMATICO (può sbagliare):
 ${L.R.heard || '(niente)'}
+
+PROBLEMI NOTI DELL'ALLIEVO (controllali in modo mirato, segnalali ogni volta che si ripresentano):
+${(ls.get('coachNotes', []) || []).map((n) => '- ' + n).join('\n') || '(nessuno)'}
 
 ERRORI DELLA VOLTA PRECEDENTE SU QUESTO TESTO:
 ${prev?.length ? prev.map((e) => `- ${e.tipo}: ${e.parola} → ${e.va_detto}`).join('\n') : '(nessuna volta precedente)'}`;
@@ -1772,7 +1776,7 @@ function renderCoach(take) {
     h += lf.map(([i, t2, at2]) => `<div class="co-lf">${i} ${esc(t2)}${at2 != null ? ` <button class="co-t" data-at="${at2}">▶ ${mmss(at2)}</button>` : ''}</div>`).join('') || '<div class="co-lf">Nessun problema misurabile.</div>';
     if (ai?.model) h += `<small class="hint">Analisi: ${esc(ai.model)} · ${coachCount()} oggi</small>`;
   }
-  h += `<div class="co-actions"><button class="cta small ghost" id="coRedo">${busy ? '🧠 Analisi in corso…' : '🔄 Rifai l\'analisi'}</button></div>`;
+  h += `<div class="co-actions"><button class="cta small" id="coAsk">💬 Chiedi al coach</button><button class="cta small ghost" id="coRedo">${busy ? 'Analisi in corso…' : '🔄 Rifai'}</button></div>`;
   $('#coachBody').innerHTML = h;
   $('#coachBody').dataset.take = take.id;
 }
@@ -1786,6 +1790,7 @@ $('#coachBody').addEventListener('click', async (e) => {
     a.currentTime = Math.max(0, +t.dataset.at - 0.6); a.play();
     setTimeout(() => { if (S.player?.audio === a) stopPlayer(); }, 4000);
   }
+  if (e.target.id === 'coAsk') { $('#sheetCoach').close(); return openChat(id); }
   if (e.target.id === 'coRedo' && !COACH.running.has(id)) { runCoach(id, true); renderCoach(await DB.get('takes', id)); }
 });
 $('#ttCoach').onclick = () => S.lastTake && openCoach(S.lastTake.id);
@@ -1804,7 +1809,133 @@ $('#gkeySave').onclick = async () => {
 };
 $('#gkeyDel').onclick = () => { COACH.key = ''; ls.set('gkey', ''); ls.set('gmodels', null); paintCoachSettings(); };
 $('#coachAuto').onchange = (e) => { COACH.auto = e.target.checked; ls.set('coachAuto', COACH.auto); };
+document.querySelectorAll('[name=coachModel]').forEach((r) => { r.checked = r.value === COACH.model; r.onchange = () => { COACH.model = r.value; ls.set('coachModel', COACH.model); }; });
 paintCoachSettings();
+
+/* ---------- chat con il coach ---------- */
+const CHAT = { hist: ls.get('chat', []), notes: ls.get('coachNotes', []), audio: null, rec: null, take: null, busy: false };
+const CHAT_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    risposta: { type: 'STRING' },
+    nuove_note: { type: 'ARRAY', items: { type: 'STRING' } },
+    esercizi: { type: 'ARRAY', items: { type: 'OBJECT', properties: { titolo: { type: 'STRING' }, testo: { type: 'STRING' } }, required: ['titolo', 'testo'] } },
+  },
+  required: ['risposta', 'nuove_note', 'esercizi'],
+};
+function notesText() { return CHAT.notes.length ? CHAT.notes.map((n) => '- ' + n).join('\n') : '(ancora nessuna)'; }
+async function recentErrors() {
+  const since = Date.now() - 14 * 86400000;
+  const ks = (await DB.all('takes')).filter((k) => k.createdAt > since && k.coach?.ai?.errori?.length);
+  const by = {};
+  for (const k of ks) for (const e of k.coach.ai.errori) { const key = `${e.tipo}: ${e.parola} → ${e.va_detto}`; by[key] = (by[key] || 0) + 1; }
+  return Object.entries(by).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([k, n]) => `- ${k}${n > 1 ? ` (×${n})` : ''}`).join('\n') || '(nessuna analisi recente)';
+}
+async function chatSystem() {
+  let takeCtx = '';
+  if (CHAT.take) {
+    const k = await DB.get('takes', CHAT.take); const t = k && (await DB.get('texts', k.textId));
+    if (k?.coach) takeCtx = `\n\nL'ALLIEVO STA PARLANDO DI QUESTA TAKE («${t?.title || ''}»). Report:\n${JSON.stringify({ ai: k.coach.ai ? { sintesi: k.coach.ai.sintesi, errori: k.coach.ai.errori } : null, misure: { ...k.coach.local, heard: undefined } })}`;
+  }
+  return `Sei il coach personale di dizione, lettura espressiva e doppiaggio dell'allievo. Stile SERGENTE: diretto, severo, concreto, niente complimenti di cortesia. L'allievo ha fatto un corso di doppiaggio, è principiante e vuole lavorare come doppiatore e voce professionista, anche da remoto. Riferimento: dizione italiana standard; ogni inflessione regionale va corretta.
+
+Quando l'allievo ti descrive un problema (es. un'inflessione) o ti manda una registrazione:
+- spiega in modo preciso cosa succede (quali suoni, quali parole, perché), senza giri di parole;
+- se mandata una registrazione, giudica quello che senti davvero, con i secondi;
+- dai 1-3 esercizi pratici e brevi in "esercizi" (titolo + testo da leggere ad alta voce, con le pause / e // e le parole chiave tra *asterischi* se servono);
+- in "nuove_note" metti SOLO fatti nuovi e stabili sull'allievo da ricordare (es. "tende ad aprire la e di bene/sempre"), frasi brevi; lista vuota se non c'è niente di nuovo;
+- "risposta": testo semplice, frasi brevi, niente markdown, al massimo 120 parole.
+
+COSA SAI GIÀ DELL'ALLIEVO:
+${notesText()}
+
+ERRORI PIÙ FREQUENTI NELLE ULTIME DUE SETTIMANE (dal coach automatico):
+${await recentErrors()}${takeCtx}`;
+}
+function renderChat() {
+  $('#chatNotes').innerHTML = CHAT.notes.length
+    ? `<div class="cn-h">Cosa so di te</div>` + CHAT.notes.map((n, i) => `<span class="cn">${esc(n)}<button data-rmnote="${i}" aria-label="Dimentica">✕</button></span>`).join('')
+    : '';
+  const list = $('#chatList');
+  list.innerHTML = (CHAT.hist.length ? '' : `<div class="msg c"><p>Dimmi cosa senti che non va: un'inflessione, una lettera, un ritmo. Se vuoi registrati con 🎙️ e lo ascolto. Più sei preciso, più sono utile.</p></div>`) +
+    CHAT.hist.map((m, i) => `<div class="msg ${m.r === 'user' ? 'u' : 'c'}">${m.audio ? '<span class="m-a">🎙️ registrazione</span>' : ''}<p>${esc(m.t).replace(/\n/g, '<br>')}</p>${(m.ex || []).map((x, j) => `<div class="m-ex"><b>${esc(x.titolo)}</b><span>${esc(x.testo).replace(/\n/g, '<br>')}</span><button class="link2" data-ex="${i}:${j}">＋ Aggiungi ai miei testi</button></div>`).join('')}</div>`).join('') +
+    (CHAT.busy ? '<div class="msg c"><p class="typing">sto ascoltando…</p></div>' : '');
+  list.scrollTop = list.scrollHeight;
+  $('#chatAtt').hidden = !CHAT.audio;
+  if (CHAT.audio) $('#chatAtt').innerHTML = `🎙️ registrazione pronta (${fmt(CHAT.audio.dur)}) <button id="chatAttRm">✕</button>`;
+  $('#chatAttRm') && ($('#chatAttRm').onclick = () => { CHAT.audio = null; renderChat(); });
+  $('#chatCtx').hidden = !CHAT.take;
+  $('#chatSend').disabled = CHAT.busy;
+}
+function openChat(takeId) {
+  CHAT.take = takeId || null;
+  if (!COACH.key) { $('#chatList').innerHTML = `<div class="msg c"><p>Per parlare con il coach serve la chiave gratuita di Gemini: ⚙️ Impostazioni → Coach AI.</p></div>`; $('#chatNotes').innerHTML = ''; open('#sheetChat'); return; }
+  renderChat(); open('#sheetChat');
+  setTimeout(() => $('#chatIn').focus(), 200);
+}
+async function sendChat() {
+  const txt = $('#chatIn').value.trim();
+  if ((!txt && !CHAT.audio) || CHAT.busy || !COACH.key) return;
+  const audio = CHAT.audio; CHAT.audio = null;
+  CHAT.hist.push({ r: 'user', t: txt || '(ascolta la registrazione)', audio: !!audio });
+  $('#chatIn').value = '';
+  CHAT.busy = true; renderChat();
+  try {
+    const models = await geminiModels(COACH.key);
+    const contents = CHAT.hist.slice(-20).map((m, i, arr) => {
+      const parts = [{ text: m.t }];
+      if (i === arr.length - 1 && audio) parts.push({ inline_data: { mime_type: 'audio/wav', data: audio.b64 } });
+      return { role: m.r === 'user' ? 'user' : 'model', parts };
+    });
+    const body = JSON.stringify({ system_instruction: { parts: [{ text: await chatSystem() }] }, contents, generationConfig: { temperature: 0.4, responseMimeType: 'application/json', responseSchema: CHAT_SCHEMA } });
+    let out = null, lastErr = null;
+    for (const model of models) {
+      const r = await fetch(`${GAPI}/models/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': COACH.key }, body });
+      if (r.status === 429 || r.status === 503 || r.status === 404) { lastErr = new Error(r.status === 429 ? 'limite gratuito di oggi raggiunto' : 'modello non disponibile'); continue; }
+      if (!r.ok) throw new Error('errore ' + r.status);
+      const js = await r.json();
+      out = JSON.parse(js.candidates?.[0]?.content?.parts?.map((x) => x.text || '').join('') || '{}');
+      bumpCoachCount(); break;
+    }
+    if (!out) throw lastErr || new Error('Gemini non disponibile');
+    CHAT.hist.push({ r: 'model', t: out.risposta || '…', ex: out.esercizi || [] });
+    for (const n of out.nuove_note || []) if (n && !CHAT.notes.includes(n)) CHAT.notes.push(n);
+    CHAT.notes = CHAT.notes.slice(-25);
+  } catch (e) {
+    CHAT.hist.push({ r: 'model', t: `Non riesco a rispondere: ${e.message || e}.` });
+  }
+  CHAT.hist = CHAT.hist.slice(-60);
+  ls.set('chat', CHAT.hist.map(({ r, t, ex, audio: a }) => ({ r, t, ex, audio: a }))); ls.set('coachNotes', CHAT.notes);
+  CHAT.busy = false; renderChat();
+}
+$('#chatSend').onclick = sendChat;
+$('#chatIn').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } });
+$('#chatMic').onclick = async () => {
+  if (CHAT.rec) { CHAT.rec.stop(); return; }
+  let stream; try { stream = await openMic(); } catch { return; }
+  const mime = pickMime(); const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : {});
+  const chunks = []; const t0 = performance.now();
+  mr.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  mr.onstop = async () => {
+    stream.getTracks().forEach((t) => t.stop()); CHAT.rec = null; $('#chatMic').classList.remove('on'); $('#chatMic').textContent = '🎙️';
+    try { const { pcm } = await decodeVideoAudio(new Blob(chunks, { type: mr.mimeType })); CHAT.audio = { b64: wavBase64(pcm), dur: performance.now() - t0 }; } catch { CHAT.audio = null; }
+    renderChat();
+  };
+  mr.start(); CHAT.rec = mr; $('#chatMic').classList.add('on'); $('#chatMic').textContent = '■';
+};
+$('#chatList').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-ex]'); if (!b) return;
+  const [i, j] = b.dataset.ex.split(':').map(Number); const x = CHAT.hist[i]?.ex?.[j]; if (!x) return;
+  const t = { id: uid(), title: x.titolo, type: 'dizione', body: x.testo, video: null, createdAt: Date.now(), lastUsed: Date.now() };
+  await DB.put('texts', t); b.textContent = '✓ Aggiunto'; b.disabled = true;
+  setTimeout(async () => { $('#sheetChat').close(); await selectText(t.id); }, 600);
+});
+$('#chatNotes').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-rmnote]'); if (!b) return;
+  CHAT.notes.splice(+b.dataset.rmnote, 1); ls.set('coachNotes', CHAT.notes); renderChat();
+});
+$('#chatClear').onclick = () => { if (!confirm('Cancellare la conversazione? (Le cose che il coach sa di te restano.)')) return; CHAT.hist = []; ls.set('chat', []); renderChat(); };
+$('#btnChat').onclick = () => openChat();
 
 /* ---------- avvio ---------- */
 applyPrefs();

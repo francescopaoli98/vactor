@@ -287,3 +287,92 @@ dialog::backdrop{background:#000a;backdrop-filter:blur(3px)}
 .key-row .cta{width:auto}
 .co-info{font-size:13px;color:var(--muted)}
 .link{color:var(--dim);text-decoration:underline;font-size:12px}
+
+/* ---------- Leggerezza: tipografia più sottile, meno bagliori, poche dimensioni ---------- */
+:root{--text:#e2efe8;--muted:#8aa99b}
+body{font-weight:400;letter-spacing:.1px}
+.logo{font-weight:600;font-size:22px;letter-spacing:.2px}
+.logo-v{text-shadow:0 0 10px #2bff8a55}
+.top{gap:6px}
+.icon-btn{width:40px;height:40px;border-radius:12px;font-size:17px;background:transparent;border-color:#2bff8a1f}
+.routine-btn{font-weight:600;font-size:13px;padding:9px 13px;box-shadow:0 0 14px #2bff8a33}
+.title-bar{padding:9px 12px;border-radius:14px}
+.cur-title{font-weight:500}
+.type-chip{font-size:12px}
+.ptext{font-weight:400;line-height:1.6}
+.ptext .spk{font-weight:600;font-family:var(--font);letter-spacing:.3px}
+.ptext .w.cur{text-shadow:none}
+.ptext .w.em{font-weight:500;text-decoration-thickness:2px}
+.readline{opacity:.35;box-shadow:none}
+.countdown{font-weight:500;font-size:120px;text-shadow:0 0 24px #2bff8a88}
+.rec{box-shadow:0 0 0 6px #ff3d6e1a,0 0 26px #ff3d6e55}
+.ds-ico{font-weight:500;font-size:20px;width:48px;height:48px;border-radius:16px}
+.dock-side,.rec-time,.mode{font-size:12px}
+.sheet-head h2{font-size:20px;font-weight:500}
+.cta{font-weight:600;font-size:16px;padding:14px}
+.cta.small{font-size:14px;padding:10px}
+.row .main b{font-weight:500}
+.rbar-label b{font-size:16px;font-weight:500}
+.rbar-time{font-size:18px;font-weight:500}
+.drill h3{font-size:22px;font-weight:500}
+.drill p{font-size:16px}
+.btext{font-size:22px;font-weight:400}
+.stats b{font-weight:500;font-size:20px}
+.band .bw{font-weight:400;font-size:22px}
+.band .bw.now{text-shadow:none}
+.dub-count{font-weight:500}
+.an{font-size:15px}
+.an-n{font-weight:500;font-size:15px}
+.big-check{box-shadow:0 0 20px #2bff8a66}
+/* report del coach: stessa impostazione, tre sole dimensioni */
+.co-sum{font-size:15px;line-height:1.5;padding:12px 14px}
+.co-sum b{font-weight:500}
+.co-pri{font-size:14px;margin-top:6px}
+.co-h{font-family:var(--font);font-size:12px;font-weight:500;margin:18px 2px 8px}
+.co-err{padding:11px 13px;border-left-width:3px}
+.co-top{font-size:12px}
+.co-w{font-size:15px;font-weight:600}
+.co-bad{font-size:14px;font-weight:400}
+.co-ok{font-size:14px}
+.co-ok b{font-size:14px;font-weight:600}
+.co-unc{font-size:12px}
+.co-ex{font-size:14px}
+.co-imp,.co-lf,.co-warn{font-size:14px}
+.co-m span{font-size:12px}
+.co-t{font-size:12px;font-weight:500}
+.co-actions{display:flex;gap:8px}
+.co-actions .cta{flex:1}
+.seg2{display:flex;gap:8px;margin:4px 0}
+.seg2 label{flex:1;display:flex;gap:8px;align-items:flex-start;padding:10px;border-radius:12px;background:var(--panel);border:1px solid var(--line);cursor:pointer}
+.seg2 input{accent-color:var(--neon);margin-top:3px}
+.seg2 b{display:block;font-weight:500;font-size:14px}
+.seg2 small{color:var(--muted);font-size:12px}
+.seg2 label:has(input:checked){border-color:var(--line2);background:#2bff8a0d}
+/* chat con il coach */
+dialog.sheet.chat{height:88dvh;display:none;flex-direction:column}
+dialog.sheet.chat[open]{display:flex}
+.chat .sheet-head{flex:none}
+.chat-notes{flex:none;display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.cn-h{width:100%;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.cn{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 6px 4px 10px;border-radius:99px;background:#b6ff3b12;border:1px solid #b6ff3b33;color:#d9f5b0}
+.cn button{color:var(--muted);font-size:11px}
+.chat-list{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:4px 0}
+.msg{max-width:88%;padding:10px 12px;border-radius:16px;font-size:15px;line-height:1.5}
+.msg p{margin:0}
+.msg.u{align-self:flex-end;background:#2bff8a1a;border:1px solid var(--line2);border-bottom-right-radius:4px}
+.msg.c{align-self:flex-start;background:var(--panel);border:1px solid var(--line);border-bottom-left-radius:4px}
+.m-a{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+.m-ex{margin-top:10px;padding:10px;border-radius:12px;background:#050a08;border:1px solid var(--line)}
+.m-ex b{display:block;font-weight:500;color:var(--lime);font-size:14px;margin-bottom:4px}
+.m-ex span{display:block;font-size:14px;color:var(--text)}
+.link2{margin-top:8px;font-size:13px;color:var(--neon)}
+.typing{color:var(--muted);animation:blink 1.2s ease-in-out infinite}
+.chat-ctx,.chat-att{flex:none;font-size:12px;color:var(--muted);padding:6px 2px}
+.chat-att button{color:var(--muted);margin-left:6px}
+.chat-bar{flex:none;display:flex;gap:8px;align-items:flex-end;padding-top:8px;border-top:1px solid var(--line)}
+.chat-bar textarea{flex:1;resize:none;max-height:120px;padding:11px 12px;border-radius:14px;border:1px solid var(--line);background:var(--panel);outline:none;font-size:15px;line-height:1.4}
+.chat-bar textarea:focus{border-color:var(--line2)}
+.chat-mic,.chat-send{width:44px;height:44px;border-radius:14px;flex:none;font-size:17px;background:var(--panel);border:1px solid var(--line)}
+.chat-send{background:var(--neon);color:#04140c;border:0;font-weight:600}
+.chat-send:disabled{opacity:.4}
+.chat-mic.on{background:var(--rec);color:#fff;border:0}

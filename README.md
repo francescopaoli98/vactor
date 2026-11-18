@@ -33,3 +33,5 @@ La tua cabina personale di lettura, dizione e doppiaggio. È una web app che si 
 - Dopo ogni take: un ascolto severo senza aiuti (parole saltate, sbagliate o aggiunte), velocità, pause rispettate o no, intonazione e cadenza (fine frase che sale, domande piatte, monotonia), volume e distorsione. Tutto sul telefono e gratis.
 - Con una chiave gratuita di Google Gemini: giudizio su accento tonico, vocali aperte/chiuse, S/Z, doppie e interpretazione, con il secondo esatto, come va detto e un esercizio. Errori dal più grave, nessun complimento, miglioramenti solo se misurati rispetto alla volta precedente.
 - Quando il modello migliore finisce il limite gratuito si passa da soli al modello leggero.
+- Chat con il coach: descrivi un problema a parole (e se vuoi con una registrazione); il coach risponde, propone esercizi da aggiungere ai testi e ricorda i tuoi punti deboli, che poi controlla in ogni analisi.
+- Scelta del modello: Leggero (~500 analisi al giorno, predefinito) o Migliore (~20 al giorno, più sensibile alle sfumature).
