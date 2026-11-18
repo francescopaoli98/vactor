@@ -401,3 +401,8 @@ dialog.sheet.chat[open]{display:flex}
 .pr-tech{margin-top:16px;font-size:13px;color:var(--muted)}
 .pr-tech summary{cursor:pointer}
 .pr-tech div{margin-top:6px;line-height:1.6}
+
+.pr-fix{margin-top:8px;padding:10px 12px;border-radius:12px;background:#2bff8a0f;border:1px solid #2bff8a33;font-size:14px;line-height:1.5}
+.pr-fix b{display:block;font-size:12px;font-weight:500;color:var(--neon);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px}
+.pr-try{margin-top:8px}
+.pr-notes{gap:18px}

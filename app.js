@@ -1623,9 +1623,9 @@ const COACH_SCHEMA = {
     errori: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
       parola: { type: 'STRING' }, contesto: { type: 'STRING' },
       tipo: { type: 'STRING', enum: ['pronuncia', 'accento', 'pausa_mancante', 'pausa_di_troppo', 'parola_saltata', 'parola_sbagliata', 'intonazione', 'ritmo', 'interpretazione', 'voce'] },
-      spiegazione: { type: 'STRING' }, prova: { type: 'STRING' }, secondo: { type: 'NUMBER' },
+      spiegazione: { type: 'STRING' }, soluzione: { type: 'STRING' }, prova: { type: 'STRING' }, secondo: { type: 'NUMBER' },
       gravita: { type: 'INTEGER' }, certezza: { type: 'STRING', enum: ['alta', 'media', 'bassa'] } },
-      required: ['parola', 'tipo', 'spiegazione', 'gravita', 'certezza'] } },
+      required: ['parola', 'tipo', 'spiegazione', 'soluzione', 'gravita', 'certezza'] } },
     miglioramenti: { type: 'ARRAY', items: { type: 'STRING' } },
   },
   required: ['sintesi', 'prima_cosa', 'errori', 'miglioramenti'],
@@ -1653,7 +1653,8 @@ REGOLE
    - "parola": la parola (o al massimo 4 parole) ESATTAMENTE come è scritta nel testo;
    - "contesto": le 2-3 parole che la PRECEDONO nel testo (serve a trovarla se è ripetuta);
    - "spiegazione": UNA frase semplice, in seconda persona, massimo 18 parole, senza termini tecnici, senza secondi e senza numeri. Esempi: «La e va chiusa: «vedérti», non «vedèrti».» · «Qui dovevi fermarti un attimo.» · «La r non vibra: sembra quasi una l.» · «Accento sbagliato: si dice «rùbrica», non «rubrìca».»
-   - "prova": un esercizio brevissimo per correggerlo (facoltativo, massimo 15 parole);
+   - "soluzione": COME SI CORREGGE in pratica: cosa fare con bocca, labbra, lingua, respiro o voce. 1-2 frasi semplici, massimo 30 parole, concrete. Esempi: «Tieni la bocca poco aperta e gli angoli delle labbra leggermente tirati, come un mezzo sorriso.» · «Appoggia la punta della lingua dietro i denti di sopra e soffia: deve vibrare da sola.» · «Sull'ultima parola alza la voce, come se fossi sorpreso.»
+   - "prova": un esercizio brevissimo per allenarlo (facoltativo, massimo 15 parole);
    - "secondo": il secondo dall'inizio della registrazione in cui succede;
    - "gravita" 1-3 (3 = grave); "certezza" alta/media/bassa (se non sei sicuro dillo, non inventare).
 4. Valuta anche pause, ritmo, intonazione/cadenza e interpretazione rispetto al genere: ${L.ref.genre}. Per problemi che riguardano tutta la lettura (es. voce monotona) metti in "parola" la prima parola del pezzo interessato.
@@ -1680,6 +1681,25 @@ ${(ls.get('coachNotes', []) || []).map((n) => '- ' + n).join('\n') || '(nessuno)
 ERRORI DELLA VOLTA PRECEDENTE SU QUESTO TESTO:
 ${prev?.length ? prev.map((e) => `- «${e.parola}»: ${e.spiegazione || e.va_detto || ''}`).join('\n') : '(nessuna volta precedente)'}`;
 }
+// soluzioni pronte, quando il coach non ne scrive una
+const FIX = {
+  pronuncia: 'Dilla prima lentamente, sillaba per sillaba, esagerando il suono giusto; poi a velocità normale.',
+  accento: 'Batti le mani sulla sillaba accentata mentre la dici, poi ripeti la parola tre volte.',
+  pausa_mancante: 'Quando vedi la barra, chiudi la bocca e prendi un piccolo respiro dal naso, poi riparti.',
+  pausa_lunga: 'Conta mentalmente «uno, due» e prendi fiato prima di ripartire.',
+  pausa_di_troppo: 'Prendi fiato prima di iniziare la frase, così arrivi in fondo senza fermarti.',
+  parola_saltata: 'Prima di registrare rileggi la frase a bassa voce e tieni lo sguardo una parola più avanti di quella che dici.',
+  parola_sbagliata: 'Rileggi la frase a bassa voce prima di registrare, poi dilla guardando bene ogni parola.',
+  domanda: 'Sull\'ultima parola alza la voce, come se fossi sorpreso.',
+  sale: 'Sull\'ultima sillaba lascia scendere la voce, come se chiudessi una porta con calma.',
+  intonazione: 'Pensa a come lo diresti parlando a un amico e riproduci quella melodia.',
+  ritmo: 'Segna dove respirare e leggi un po\' più piano: ogni frase deve avere il suo tempo.',
+  interpretazione: 'Prima di leggere chiediti a chi parli e cosa vuoi ottenere, poi dillo con quell\'intenzione.',
+  voce: 'Respira con la pancia e sostieni la voce fino alla fine della frase.',
+  piatta: 'Scegli una o due parole importanti per frase e dille un po\' più alte e più lente.',
+  distorto: 'Allontanati di una spanna dal microfono o abbassa il guadagno della scheda audio.',
+  basso: 'Avvicinati al microfono, a circa una spanna, e parla con la voce piena.',
+};
 // uniforma risposte vecchie e nuove, scarta quelle senza senso
 function cleanAI(ai) {
   const n2 = (x) => norm(x || '');
@@ -1690,7 +1710,7 @@ function cleanAI(ai) {
       spiegazione = e.hai_detto ? `Si dice «${e.va_detto}», non «${e.hai_detto}».` : e.va_detto;
     }
     if (!spiegazione || !e.parola) return null;
-    return { ...e, spiegazione, prova: e.prova || e.esercizio || '' };
+    return { ...e, spiegazione, soluzione: e.soluzione || FIX[e.tipo] || '', prova: e.prova || e.esercizio || '' };
   }).filter(Boolean);
   ai.prima_cosa = ai.prima_cosa || ai.priorita || '';
   ai.miglioramenti = ai.miglioramenti || [];
@@ -1786,19 +1806,19 @@ function coachView(take, text) {
     const pos = find(e.parola, e.contesto, e.secondo);
     const unsure = e.certezza === 'bassa';
     const msg = unsure ? 'Forse ' + e.spiegazione.charAt(0).toLowerCase() + e.spiegazione.slice(1) : e.spiegazione;
-    if (!pos) { if (['intonazione', 'ritmo', 'interpretazione', 'voce'].includes(e.tipo)) general.push({ msg, prova: e.prova, t: e.secondo ?? null }); continue; } // parola non presente nel testo: abbaglio
+    if (!pos) { if (['intonazione', 'ritmo', 'interpretazione', 'voce'].includes(e.tipo)) general.push({ msg, fix: e.soluzione, prova: e.prova, t: e.secondo ?? null }); continue; } // parola non presente nel testo: abbaglio
     const kind = e.tipo === 'pausa_mancante' ? 'pause' : e.tipo === 'parola_saltata' ? 'skip' : 'word';
     if (kind === 'pause' && toks[pos.i1]?.pz && times[pos.i1] != null && times[pos.i1 + 1] != null && !(R.pauseMissed || []).some((p) => p.i === pos.i1)) continue; // il telefono ha misurato la pausa: non è un errore
-    add({ ...pos, kind, msg, prova: e.prova, t: tAt(pos.i0, e.secondo) });
+    add({ ...pos, kind, msg, fix: (e.soluzione && e.soluzione !== FIX[e.tipo] ? e.soluzione : null) || (e.tipo === 'intonazione' && /\?/.test(toks[pos.i1]?.w || '') ? FIX.domanda : FIX[e.tipo]), prova: e.prova, t: tAt(pos.i0, e.secondo) });
   }
-  for (const m of R.miss || []) if (m.i0 != null) add({ i0: m.i0, i1: m.i1, kind: 'skip', msg: m.i1 > m.i0 ? 'Hai saltato queste parole.' : 'Hai saltato questa parola.', t: m.t });
-  for (const p of R.pauseMissed || []) if (p.i != null) add({ i0: p.i, i1: p.i, kind: 'pause', msg: p.need > 0.5 ? 'Qui serviva una pausa lunga: respira prima di ripartire.' : 'Qui dovevi fermarti un attimo.', t: tAt(p.i, p.t) });
-  for (const p of R.pauseExtra || []) if (p.i != null) add({ i0: p.i, i1: p.i, kind: 'word', msg: 'Qui ti sei fermato senza motivo: la frase va detta tutta di seguito.', t: tAt(p.i, p.t) });
-  for (const p of R.rising || []) if (p.i != null) add({ i0: p.i, i1: p.i, kind: 'word', msg: 'Qui la voce sale come in una domanda: a fine frase deve scendere.', t: tAt(p.i, p.t) });
-  for (const p of R.flatQ || []) if (p.i != null) add({ i0: p.i, i1: p.i, kind: 'word', msg: 'È una domanda: alla fine la voce deve salire.', t: tAt(p.i, p.t) });
-  if (R.pitchRange != null && R.pitchRange < 4) general.push({ msg: 'Voce troppo piatta: fai salire e scendere di più la voce.' });
-  if (R.clip) general.push({ msg: 'Audio distorto: allontanati un po\' dal microfono.' });
-  else if (R.peakDb != null && R.peakDb < -18) general.push({ msg: 'Volume basso: avvicinati al microfono.' });
+  for (const m of R.miss || []) if (m.i0 != null) add({ i0: m.i0, i1: m.i1, kind: 'skip', msg: m.i1 > m.i0 ? 'Hai saltato queste parole.' : 'Hai saltato questa parola.', fix: FIX.parola_saltata, t: m.t });
+  for (const p of R.pauseMissed || []) if (p.i != null) add({ i0: p.i, i1: p.i, kind: 'pause', msg: p.need > 0.5 ? 'Qui serviva una pausa lunga.' : 'Qui dovevi fermarti un attimo.', fix: p.need > 0.5 ? FIX.pausa_lunga : FIX.pausa_mancante, t: tAt(p.i, p.t) });
+  for (const p of R.pauseExtra || []) if (p.i != null) add({ i0: p.i, i1: p.i, kind: 'word', msg: 'Qui ti sei fermato senza motivo: la frase va detta tutta di seguito.', fix: FIX.pausa_di_troppo, t: tAt(p.i, p.t) });
+  for (const p of R.rising || []) if (p.i != null) add({ i0: p.i, i1: p.i, kind: 'word', msg: 'Qui la voce sale come in una domanda: a fine frase deve scendere.', fix: FIX.sale, t: tAt(p.i, p.t) });
+  for (const p of R.flatQ || []) if (p.i != null) add({ i0: p.i, i1: p.i, kind: 'word', msg: 'È una domanda: alla fine la voce deve salire.', fix: FIX.domanda, t: tAt(p.i, p.t) });
+  if (R.pitchRange != null && R.pitchRange < 4) general.push({ msg: 'Voce troppo piatta: fai salire e scendere di più la voce.', fix: FIX.piatta });
+  if (R.clip) general.push({ msg: 'Audio distorto.', fix: FIX.distorto });
+  else if (R.peakDb != null && R.peakDb < -18) general.push({ msg: 'Volume basso.', fix: FIX.basso });
   items.sort((a, b) => a.i0 - b.i0 || a.i1 - b.i1);
   items.forEach((it, k) => (it.n = k + 1));
   return { toks, items, general };
@@ -1844,10 +1864,10 @@ async function renderCoach(take) {
       }
       h += `<div class="pr-paper">${paper}</div>`;
       h += `<div class="pr-notes">` + items.map((it) => `<div class="pr-item"><span class="pr-n big">${it.n}</span><div>
-        <div class="pr-msg">${esc(it.msg)}</div>${it.prova ? `<div class="pr-try">Prova: ${esc(it.prova)}</div>` : ''}
+        <div class="pr-msg">${esc(it.msg)}</div>${it.fix ? `<div class="pr-fix"><b>Come si fa</b>${esc(it.fix)}</div>` : ''}${it.prova ? `<div class="pr-try">Prova: ${esc(it.prova)}</div>` : ''}
         ${it.t != null ? `<button class="pr-play" data-at="${it.t}">▶ Riascoltati</button>` : ''}</div></div>`).join('') + `</div>`;
     }
-    if (general.length) h += `<div class="pr-notes">` + general.map((g) => `<div class="pr-item"><span class="pr-n big dot">•</span><div><div class="pr-msg">${esc(g.msg)}</div>${g.prova ? `<div class="pr-try">Prova: ${esc(g.prova)}</div>` : ''}${g.t != null ? `<button class="pr-play" data-at="${g.t}">▶ Riascoltati</button>` : ''}</div></div>`).join('') + `</div>`;
+    if (general.length) h += `<div class="pr-notes">` + general.map((g) => `<div class="pr-item"><span class="pr-n big dot">•</span><div><div class="pr-msg">${esc(g.msg)}</div>${g.fix ? `<div class="pr-fix"><b>Come si fa</b>${esc(g.fix)}</div>` : ''}${g.prova ? `<div class="pr-try">Prova: ${esc(g.prova)}</div>` : ''}${g.t != null ? `<button class="pr-play" data-at="${g.t}">▶ Riascoltati</button>` : ''}</div></div>`).join('') + `</div>`;
     if (ai?.miglioramenti?.length) h += `<div class="pr-better"><b>Migliorato dalla volta scorsa</b>${ai.miglioramenti.map((m) => `<div>✓ ${esc(m)}</div>`).join('')}</div>`;
     h += `<details class="pr-tech"><summary>Dettagli tecnici</summary><div>${R.wpm ? `${R.wpm} parole al minuto · ` : ''}${R.pitchRange != null ? `escursione voce ${dec(R.pitchRange)} semitoni · ` : ''}${R.peakDb != null ? `picco ${R.peakDb} dB` : ''}${ai?.model ? `<br>Analisi: ${esc(ai.model)} · ${coachCount()} oggi` : ''}</div></details>`;
   }
