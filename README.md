@@ -28,3 +28,8 @@ La tua cabina personale di lettura, dizione e doppiaggio. È una web app che si 
 - Prova dell'anello con voce originale, loop, 3 bip prima dell'attacco
 - Misuratore di sync dopo ogni take (attacco e chiusura in anticipo o in ritardo)
 - Esportazione del video doppiato (MP4 dove supportato, altrimenti WebM)
+
+**Fase 4 «Coach Sergente»**
+- Dopo ogni take: un ascolto severo senza aiuti (parole saltate, sbagliate o aggiunte), velocità, pause rispettate o no, intonazione e cadenza (fine frase che sale, domande piatte, monotonia), volume e distorsione. Tutto sul telefono e gratis.
+- Con una chiave gratuita di Google Gemini: giudizio su accento tonico, vocali aperte/chiuse, S/Z, doppie e interpretazione, con il secondo esatto, come va detto e un esercizio. Errori dal più grave, nessun complimento, miglioramenti solo se misurati rispetto alla volta precedente.
+- Quando il modello migliore finisce il limite gratuito si passa da soli al modello leggero.

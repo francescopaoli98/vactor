@@ -74,6 +74,7 @@
   <div class="take-toast" id="takeToast" hidden>
     <button class="tt-play" id="ttPlay">▶</button>
     <div class="tt-info"><b id="ttName">Take 1</b><span id="ttMeta">0:00</span></div>
+    <button class="tt-btn coach" id="ttCoach" aria-label="Coach">🧠</button>
     <button class="tt-btn" id="ttStar" aria-label="Preferita">☆</button>
     <button class="tt-btn" id="ttAll">Tutte</button>
   </div>
@@ -143,6 +144,12 @@
   <div class="list" id="archList"></div>
 </dialog>
 
+<!-- COACH -->
+<dialog class="sheet" id="sheetCoach">
+  <div class="sheet-head"><h2>🧠 Coach</h2><button class="x" data-close>✕</button></div>
+  <div id="coachBody"></div>
+</dialog>
+
 <!-- IMPOSTAZIONI -->
 <dialog class="sheet" id="sheetSettings">
   <div class="sheet-head"><h2>Impostazioni</h2><button class="x" data-close>✕</button></div>
@@ -151,6 +158,13 @@
   </label>
   <small class="hint">Sul computer scegli qui il tuo microfono USB professionale.</small>
   <div class="field">💾 Spazio usato <b id="storage">—</b></div>
+  <div class="field">🧠 Coach AI «Sergente»
+    <small class="hint">Per il giudizio su accenti, vocali aperte/chiuse e interpretazione serve una chiave gratuita di Google Gemini. La chiave resta solo su questo telefono.</small>
+    <a class="cal-link" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">🔑 Crea la chiave gratuita su Google AI Studio ›</a>
+    <div class="key-row"><input class="in" id="gkey" type="password" autocomplete="off" placeholder="Incolla qui la chiave (AIza…)"><button class="cta small" id="gkeySave">Salva</button></div>
+    <label class="day on"><span>Analizza ogni take in automatico</span><input type="checkbox" id="coachAuto"></label>
+    <div class="co-info"><span id="coachInfo"></span> <button class="link" id="gkeyDel">rimuovi chiave</button></div>
+  </div>
   <div class="field soon">☁️ Copia su Google Drive <span class="pill">prossima fase</span></div>
   <div class="field">🔔 Promemoria allenamento
     <small class="hint">Scegli i giorni e l'orario. Google Calendar ti avviserà sul telefono, in mezzo ai tuoi impegni.</small>

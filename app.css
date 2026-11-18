@@ -255,3 +255,35 @@ dialog::backdrop{background:#000a;backdrop-filter:blur(3px)}
 .drill p.small{font-size:14px;color:var(--muted);margin-top:12px}
 .hint.pad{padding:10px 4px}
 .dub .recording .rec-time{color:var(--rec)}
+
+/* ---------- Fase 4: coach ---------- */
+.tt-btn.coach{color:var(--lime)}
+.tt-btn.coach.busy{animation:blink 1s ease-in-out infinite}
+@keyframes blink{50%{opacity:.4}}
+.act.coach sup{font-size:10px;color:#ff7a9a;margin-left:1px}
+.co-sum{padding:14px;border-radius:16px;background:var(--panel2);border:1px solid var(--line2);font-size:16px;line-height:1.45}
+.co-pri{margin-top:8px;color:var(--lime);font-size:15px}
+.co-h{font-family:var(--display);font-size:16px;margin:18px 2px 8px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.co-err{padding:12px 14px;border-radius:14px;background:var(--panel);border:1px solid var(--line);border-left:4px solid #ffb347;margin-bottom:8px}
+.co-err.g3{border-left-color:var(--rec)}.co-err.g2{border-left-color:#ffb347}.co-err.g1{border-left-color:#5fd2ff}
+.co-top{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted);margin-bottom:4px}
+.co-w{font-size:19px;font-weight:700}
+.co-bad{font-size:14px;font-weight:500;color:#ff7a9a;margin-left:6px}
+.co-ok{font-size:15px;color:#cde8db;margin-top:2px}
+.co-ok b{color:var(--neon);font-size:17px}
+.co-unc{font-style:normal;font-size:12px;color:#ffb347;margin-left:6px}
+.co-ex{font-size:14px;color:var(--muted);margin-top:6px;line-height:1.4}
+.co-imp{padding:10px 12px;border-radius:12px;background:#2bff8a10;color:var(--neon);margin-bottom:6px;font-size:15px}
+.co-warn{padding:12px 14px;border-radius:14px;background:#ffb34714;border:1px solid #ffb34744;color:#ffd08a;font-size:14px;line-height:1.45}
+.co-m{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.co-m span{padding:6px 10px;border-radius:99px;background:var(--panel);border:1px solid var(--line);font-size:13px}
+.co-lf{font-size:14px;padding:8px 2px;border-bottom:1px solid var(--line);line-height:1.4}
+.co-t{padding:3px 8px;border-radius:8px;background:#2bff8a18;color:var(--neon);font-size:12px;font-weight:700}
+.co-actions{margin-top:16px}
+.co-list{margin:4px 0 14px;display:flex;flex-direction:column;gap:6px}
+.co-item{text-align:left}
+.key-row{display:flex;gap:8px;align-items:center}
+.key-row .in{margin:0}
+.key-row .cta{width:auto}
+.co-info{font-size:13px;color:var(--muted)}
+.link{color:var(--dim);text-decoration:underline;font-size:12px}
