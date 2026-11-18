@@ -20,3 +20,11 @@ La tua cabina personale di lettura, dizione e doppiaggio. È una web app che si 
 - Pause (`/` breve, `//` lunga) e parole chiave (`*parola*`) segnate nel testo
 - «Prima e dopo»: confronto con la lettura precedente dello stesso testo
 - Promemoria per giorno della settimana tramite Google Calendar
+
+**Fase 3 «Leggio di doppiaggio»**
+- Carichi un video: l'app ascolta la voce originale (offline) e mette ogni parola al suo tempo; con il copione lo allinea, senza copione lo ricava dall'audio
+- Divisione automatica in anelli (battute), battute del copione non presenti nel video escluse
+- Banda ritmica che scorre sotto il video con le parole allungate secondo la durata, segni di pausa e respiro
+- Prova dell'anello con voce originale, loop, 3 bip prima dell'attacco
+- Misuratore di sync dopo ogni take (attacco e chiusura in anticipo o in ritardo)
+- Esportazione del video doppiato (MP4 dove supportato, altrimenti WebM)

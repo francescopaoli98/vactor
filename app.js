@@ -92,11 +92,16 @@ function renderText() {
   $('#prompter').scrollTop = 0;
   const v = $('#video');
   if (S.videoURL) URL.revokeObjectURL(S.videoURL), (S.videoURL = null);
+  document.body.classList.toggle('dub', !!t?.video);
+  cancelAnimationFrame(DUB.raf); $('#band').hidden = true; $('#dubTools').hidden = true;
+  if (!t?.video && !RT.on) rpanel('');
   if (t?.video) {
     S.videoURL = URL.createObjectURL(t.video);
     v.src = S.videoURL;
     $('#videoWrap').hidden = false;
     $('#guideRow').hidden = false;
+    F.words = [];
+    renderDub();
   } else {
     v.removeAttribute('src'); v.load();
     $('#videoWrap').hidden = true;
@@ -381,6 +386,7 @@ $('#btnRec').onclick = () => (S.rec ? (S.rec.counting ? cancelRec() : stopRec())
 
 async function startRec() {
   if (!S.text) return openNew();
+  if (S.text.video && S.text.sync?.anelli?.length) return dubRec();
   stopPlayer();
   let stream;
   try { stream = await openMic(); }
@@ -464,10 +470,12 @@ async function stopRec() {
   teardown(R);
   if (duration < 700) return recStopped(null);
   const take = { id: uid(), textId: S.text.id, blob: new Blob(R.chunks, { type: R.mime }), mime: R.mime, duration, createdAt: Date.now(), mode: S.mode, starred: false };
+  if (R.dub) { take.anello = R.dub.an; take.vs = R.dub.vs; }
   await DB.put('takes', take);
   await refreshTakes();
   showToast(S.takes.at(-1));
   recStopped(S.takes.at(-1));
+  if (R.dub) { $('#ttName').textContent = `Anello ${R.dub.an + 1} · take ${S.takes.filter((k) => k.anello === R.dub.an).length}`; $('#ttMeta').textContent = 'misuro il sync…'; afterDubTake(S.takes.at(-1)); renderAnelli(); }
 }
 
 /* ---------- riascolto ---------- */
@@ -496,7 +504,7 @@ function playTake(take, onEnd) {
   S.player = { id: take.id, audio, url, onEnd };
   audio.onended = () => { if (S.player?.audio === audio) stopPlayer(); };
   if (S.text?.video && take.textId === S.text.id) {
-    const v = $('#video'); v.muted = true; v.currentTime = 0; v.play().catch(() => {});
+    const v = $('#video'); v.muted = true; v.currentTime = take.vs || 0; v.play().catch(() => {});
   }
   audio.play();
   return true;
@@ -618,11 +626,15 @@ $('#btnSaveNew').onclick = async () => {
   const body = $('#newBody').value.trim();
   if (!body && !draft.video) { $('#newStatus').textContent = 'Aggiungi un testo o un video.'; return; }
   const title = $('#newName').value.trim() || body.split('\n')[0].replace(/^[A-ZÀ-Ý .'’-]{1,24}:\s*/, '').slice(0, 48) || 'Senza titolo';
+  const old = draft.id ? await DB.get('texts', draft.id) : null;
   const t = { id: draft.id || uid(), title, type: draft.type, body, video: draft.video || null, videoName: draft.videoName || null,
     createdAt: draft.createdAt || Date.now(), lastUsed: Date.now() };
+  const sameVideo = old?.video && t.video === old.video;
+  if (old?.sync && sameVideo) t.sync = old.sync;
   await DB.put('texts', t);
   $('#sheetNew').close();
   await selectText(t.id);
+  if (t.video && (!t.sync || old?.body !== body || !sameVideo)) analyzeVideo(t.id);
 };
 $('#btnNew').onclick = () => openNew();
 
@@ -793,6 +805,417 @@ async function checkInbox() {
   }
   if (files.length) { openNew(); await ingest(files); }
 }
+
+/* ---------- Fase 3: leggio di doppiaggio ---------- */
+const PXS = 170;          // pixel per secondo della banda ritmica
+const PRE = 3.3;          // pre-roll prima dell'anello (3 bip)
+const DUB = { an: 0, raf: 0, loop: false, prova: false, spans: [], cur: -1, busy: null };
+const fmtT = (x) => `${Math.floor(x / 60)}:${(x % 60).toFixed(1).padStart(4, '0')}`;
+
+// 1. audio del video → 16 kHz mono
+async function decodeVideoAudio(blob) {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ac = new AC();
+  const buf = await ac.decodeAudioData(await blob.arrayBuffer());
+  ac.close().catch(() => {});
+  const off = new OfflineAudioContext(1, Math.ceil(buf.duration * 16000), 16000);
+  const src = off.createBufferSource(); src.buffer = buf; src.connect(off.destination); src.start();
+  const out = await off.startRendering();
+  return { pcm: out.getChannelData(0), duration: buf.duration };
+}
+// 2. trascrizione con i tempi di ogni parola
+async function transcribe(pcm, grammar, onProgress) {
+  const model = await loadVosk();
+  const rec = grammar ? new model.KaldiRecognizer(16000, grammar) : new model.KaldiRecognizer(16000);
+  rec.setWords(true);
+  const words = [];
+  const CH = 8000;
+  const chunks = Math.ceil(pcm.length / CH);
+  let events = 0, finalSent = false;
+  return new Promise((resolve) => {
+    let idle = null;
+    const bump = () => {
+      events++; onProgress?.(Math.min(0.99, events / (chunks + 1)));
+      if (finalSent) { clearTimeout(idle); idle = setTimeout(done, events >= chunks + 1 ? 300 : 4000); }
+    };
+    const done = () => { try { rec.remove(); } catch {} resolve(words); };
+    rec.on('result', (m) => { for (const r of m?.result?.result || []) if (r.word && r.word !== '[unk]') words.push({ w: r.word, s: r.start, e: r.end }); bump(); });
+    rec.on('partialresult', bump);
+    (async () => {
+      for (let i = 0; i < chunks; i++) {
+        rec.acceptWaveformFloat(pcm.slice(i * CH, (i + 1) * CH), 16000);
+        if (i % 20 === 19) await sleep(0);
+      }
+      rec.retrieveFinalResult(); finalSent = true;
+      idle = setTimeout(done, 15000);
+    })();
+  });
+}
+// parole del copione (senza nomi, indicazioni e segni di pausa)
+function copioneTokens(body) {
+  const toks = [];
+  body.split('\n').forEach((line, li) => {
+    let rest = line; let spk = '';
+    const m = rest.match(/^\s*([A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý0-9 .'’-]{0,24}):/);
+    if (m) { spk = m[1].trim(); rest = rest.slice(m[0].length); }
+    for (const part of rest.split(/(\([^)\n]{1,80}\))/)) {
+      if (/^\(.*\)$/.test(part)) { if (toks.length && toks.at(-1).line === li) toks.at(-1).br = true; continue; }
+      for (const tok of part.split(/\s+/)) {
+        if (!tok) continue;
+        if (/^\/{1,2}$/.test(tok)) { if (toks.length) toks.at(-1).pz = tok.length; continue; }
+        const shown = tok.replace(/\*/g, ''); const n = norm(shown);
+        if (n) toks.push({ w: shown, n, line: li, spk });
+      }
+    }
+  });
+  return toks;
+}
+// 3. allinea il copione alle parole riconosciute (programmazione dinamica)
+function align(toks, rec) {
+  let n = toks.length; const m = rec.length;
+  const rn = rec.map((r) => norm(r.w));
+  const S2 = Array.from({ length: n + 1 }, () => new Float32Array(m + 1));
+  for (let i = 1; i <= n; i++) S2[i][0] = -i * 0.5;
+  for (let j = 1; j <= m; j++) S2[0][j] = -j * 0.5;
+  for (let i = 1; i <= n; i++) for (let j = 1; j <= m; j++) {
+    const ok = similar(toks[i - 1].n, rn[j - 1]);
+    S2[i][j] = Math.max(S2[i - 1][j - 1] + (ok ? 2 : -1), S2[i - 1][j] - 0.5, S2[i][j - 1] - 0.5);
+  }
+  let i = n, j = m;
+  while (i > 0 && j > 0) {
+    const ok = similar(toks[i - 1].n, rn[j - 1]);
+    if (S2[i][j] === S2[i - 1][j - 1] + (ok ? 2 : -1)) { if (ok) { toks[i - 1].s = rec[j - 1].s; toks[i - 1].e = rec[j - 1].e; } i--; j--; }
+    else if (S2[i][j] === S2[i - 1][j] - 0.5) i--; else j--;
+  }
+  // battute del copione che nel video non si sentono: le tolgo dalla banda
+  const lines = {};
+  toks.forEach((t) => { const L = (lines[t.line] ||= { n: 0, ok: 0 }); L.n++; if (t.s != null) L.ok++; });
+  toks = toks.filter((t) => { const L = lines[t.line]; return !(L.n >= 2 && L.ok / L.n < 0.25) && !(L.n < 2 && L.ok === 0 && rec.length); });
+  n = toks.length;
+  // parole non trovate: tempi interpolati tra le vicine
+  let k = 0;
+  while (k < n) {
+    if (toks[k].s != null) { k++; continue; }
+    let a = k; while (k < n && toks[k].s == null) k++;
+    const t0 = a > 0 ? toks[a - 1].e : Math.max(0, (toks[k]?.s ?? 0.3) - 0.35 * (k - a));
+    const t1 = k < n ? toks[k].s : t0 + 0.35 * (k - a);
+    const step = Math.max(0.12, (t1 - t0) / (k - a));
+    for (let q = a; q < k; q++) { toks[q].s = t0 + (q - a) * step; toks[q].e = toks[q].s + step * 0.9; }
+  }
+  return toks;
+}
+// 4. divide in anelli (battute)
+function buildAnelli(toks) {
+  const an = [];
+  let cur = null;
+  toks.forEach((t, i) => {
+    const prev = toks[i - 1];
+    const gap = prev ? t.s - prev.e : 0;
+    const newLine = prev && t.line !== prev.line;
+    const long = cur && t.e - cur.s > 7.5 && gap > 0.25;
+    if (!cur || gap > 1.1 || (newLine && (gap > 0.25 || t.spk !== prev.spk)) || long || (newLine && t.spk && t.spk !== prev.spk)) {
+      cur = { s: t.s, e: t.e, i0: i, i1: i, spk: t.spk };
+      an.push(cur);
+    } else { cur.e = t.e; cur.i1 = i; }
+  });
+  return an.map((a) => ({ ...a, text: toks.slice(a.i0, a.i1 + 1).map((t) => t.w).join(' ') }));
+}
+async function analyzeVideo(id) {
+  if (DUB.busy) return;
+  DUB.busy = id;
+  const show = (msg, p) => { if (S.text?.id === id) rpanel(`<div class="drill"><div class="dnum">Banda ritmica</div><h3>${msg}</h3>
+    <div class="dbar"><i class="static" style="transform:scaleX(${p || 0})"></i></div><p class="small">Ascolto la voce originale e metto ogni parola al suo tempo. Rimane tutto sul telefono.</p></div>`); };
+  try {
+    let t = await DB.get('texts', id);
+    show('Preparo il riconoscimento…', 0.02);
+    await loadVosk();
+    show('Estraggo l\'audio dal video…', 0.05);
+    const { pcm, duration } = await decodeVideoAudio(t.video);
+    const hasCop = !!t.body?.trim();
+    const grammar = hasCop ? grammarOf(t.body) : null;
+    const raw = await transcribe(pcm, grammar, (p) => show(`Analizzo la voce originale… ${Math.round(p * 100)}%`, 0.05 + p * 0.9));
+    t = await DB.get('texts', id);
+    let toks;
+    if (hasCop) toks = align(copioneTokens(t.body), raw);
+    else {
+      toks = raw.map((r) => ({ w: r.w, n: norm(r.w), s: r.s, e: r.e, line: 0, spk: '' }));
+      const an0 = buildAnelli(toks);
+      an0.forEach((a, k) => { for (let q = a.i0; q <= a.i1; q++) toks[q].line = k; });
+      t.body = an0.map((a) => a.text).join('\n');
+    }
+    const anelli = buildAnelli(toks);
+    t.sync = { toks: toks.map(({ w, s, e, spk, pz, br, line }) => ({ w, s, e, spk, pz, br, line })), anelli, duration, auto: !hasCop, raw, at: Date.now() };
+    await DB.put('texts', t);
+    rpanel('');
+    if (S.text?.id === id) { S.text = t; DUB.an = 0; renderText(); }
+    if (!raw.length) toast2('Non ho sentito parole nel video. Controlla che abbia l\'audio originale.');
+  } catch (e) {
+    console.error(e);
+    if (S.text?.id === id) rpanel(`<div class="drill"><h3>Non riesco ad analizzare questo video</h3><p>${esc(String(e.message || e))}</p><button class="cta" id="dubRetry">Riprova</button></div>`);
+    $('#dubRetry') && ($('#dubRetry').onclick = () => { rpanel(''); DUB.busy = null; analyzeVideo(id); });
+  } finally { DUB.busy = null; }
+}
+function toast2(msg) { followNote(msg); setTimeout(() => followNote(''), 4000); }
+
+// 5. interfaccia
+function renderDub() {
+  const t = S.text;
+  const band = $('#band');
+  cancelAnimationFrame(DUB.raf);
+  if (!t.sync?.anelli?.length) {
+    band.hidden = true; $('#dubTools').hidden = true;
+    $('#ptext').innerHTML = '';
+    if (DUB.busy !== t.id) rpanel(`<div class="drill"><div class="dnum">Leggio di doppiaggio</div><h3>Creo la banda ritmica?</h3>
+      <p>Ascolto la voce originale del video, metto ogni parola al suo tempo e divido la scena in anelli.${t.body?.trim() ? ' Userò il tuo copione.' : ' Se hai il copione, aggiungilo prima con ✏️: sarà più preciso.'}</p>
+      <button class="cta" id="dubGo">🎞️ Crea la banda ritmica</button></div>`);
+    $('#dubGo') && ($('#dubGo').onclick = () => analyzeVideo(t.id));
+    return;
+  }
+  rpanel('');
+  const sy = t.sync;
+  DUB.an = Math.min(DUB.an, sy.anelli.length - 1);
+  // banda
+  band.hidden = false; $('#dubTools').hidden = false;
+  const track = $('#bandTrack');
+  track.innerHTML = sy.toks.map((k, i) => `<span class="bw" data-i="${i}" style="left:${(k.s * PXS).toFixed(1)}px">${esc(k.w)}${k.br ? '<em class="br">↑</em>' : ''}</span>${k.pz ? `<i class="bp${k.pz > 1 ? ' l' : ''}" style="left:${((k.e + 0.05) * PXS).toFixed(1)}px"></i>` : ''}`).join('')
+    + sy.anelli.map((a, i) => `<b class="ba" style="left:${(a.s * PXS - 6).toFixed(1)}px">${String(i + 1).padStart(2, '0')}${a.spk ? ' · ' + esc(a.spk) : ''}</b>`).join('');
+  DUB.spans = [...track.querySelectorAll('.bw')];
+  requestAnimationFrame(() => DUB.spans.forEach((el, i) => {
+    const k = sy.toks[i]; const nx = sy.toks[i + 1]; const room = Math.min(k.e, nx ? nx.s : k.e) - k.s; const want = Math.max(0.12 * PXS, room * PXS - 10); const w = el.offsetWidth || 1;
+    el.style.transform = `scaleX(${Math.min(1.7, Math.max(0.45, want / w)).toFixed(3)})`;
+  }));
+  DUB.cur = -1;
+  // anelli
+  renderAnelli();
+  const v = $('#video');
+  const an = sy.anelli[DUB.an];
+  const seekTo = () => { if (v.paused) v.currentTime = Math.max(0, an.s - 0.05); };
+  v.readyState >= 1 ? seekTo() : v.addEventListener('loadedmetadata', seekTo, { once: true });
+  const loop = () => { bandTick(); DUB.raf = requestAnimationFrame(loop); };
+  DUB.raf = requestAnimationFrame(loop);
+}
+async function renderAnelli() {
+  const t = S.text, sy = t.sync;
+  const takes = await DB.takesOf(t.id);
+  const by = {};
+  takes.sort((a, b) => a.createdAt - b.createdAt).forEach((k) => { if (k.anello != null) (by[k.anello] ||= []).push(k); });
+  $('#ptext').innerHTML = `<div class="anelli">` + sy.anelli.map((a, i) => {
+    const ks = by[i] || []; const last = ks.at(-1);
+    return `<button class="an ${i === DUB.an ? 'cur' : ''}" data-an="${i}">
+      <span class="an-n">${String(i + 1).padStart(2, '0')}</span>
+      <span class="an-b"><small>${fmtT(a.s)}${a.spk ? ' · ' + esc(a.spk) : ''}</small>${esc(a.text)}</span>
+      <span class="an-k">${ks.length ? `${ks.length} take${last?.sync ? '<br>' + syncBadge(last.sync) : ''}` : ''}</span></button>`;
+  }).join('') + `</div>` + (sy.auto ? `<p class="hint pad">Testo ricavato dall'audio: se vedi parole sbagliate correggile con ✏️ (in alto, tocca il titolo), la banda si rifà da sola.</p>` : '');
+  $('#ptext').querySelector('.an.cur')?.scrollIntoView({ block: 'center' });
+}
+$('#ptext').addEventListener('click', (e) => {
+  const b = e.target.closest('.an'); if (!b || S.rec) return;
+  selectAnello(+b.dataset.an);
+});
+function selectAnello(i) {
+  const sy = S.text?.sync; if (!sy) return;
+  DUB.an = Math.max(0, Math.min(sy.anelli.length - 1, i));
+  stopProva();
+  const v = $('#video'); v.pause(); v.currentTime = Math.max(0, sy.anelli[DUB.an].s - 0.05);
+  document.querySelectorAll('.an').forEach((el) => el.classList.toggle('cur', +el.dataset.an === DUB.an));
+  document.querySelector('.an.cur')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  $('#takeToast').hidden = true;
+}
+function bandTick() {
+  const sy = S.text?.sync; if (!sy) return;
+  const v = $('#video'); const t = v.currentTime;
+  const lineX = $('#band').clientWidth * 0.25;
+  $('#bandTrack').style.transform = `translateX(${(lineX - t * PXS).toFixed(1)}px)`;
+  // parola corrente
+  let lo = 0, hi = sy.toks.length - 1, idx = -1;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (sy.toks[mid].s <= t) { idx = mid; lo = mid + 1; } else hi = mid - 1; }
+  if (idx !== DUB.cur) {
+    const a = Math.min(idx, DUB.cur), b = Math.max(idx, DUB.cur);
+    for (let i = Math.max(0, a); i <= b && i < DUB.spans.length; i++) { DUB.spans[i].classList.toggle('past', i < idx); DUB.spans[i].classList.toggle('now', i === idx && t <= sy.toks[i].e + 0.15); }
+    DUB.cur = idx;
+  } else if (idx >= 0 && DUB.spans[idx]) DUB.spans[idx].classList.toggle('now', t <= sy.toks[idx].e + 0.15);
+  // prova in loop
+  if (DUB.prova && !S.rec) {
+    const an = sy.anelli[DUB.an];
+    if (t >= an.e + 0.6) { if (DUB.loop) { v.currentTime = Math.max(0, an.s - 1.2); } else stopProva(); }
+  }
+  // fine anello durante la registrazione
+  if (S.rec?.dub && !S.rec.stopping && t >= S.rec.dub.end) stopRec();
+}
+function stopProva() {
+  if (!DUB.prova) return;
+  DUB.prova = false; $('#video').pause(); $('#dubPlay').textContent = '▶ Prova';
+}
+$('#dubPlay').onclick = () => {
+  if (S.rec) return;
+  const sy = S.text?.sync; if (!sy) return;
+  if (DUB.prova) return stopProva();
+  stopPlayer();
+  const v = $('#video'); const an = sy.anelli[DUB.an];
+  v.currentTime = Math.max(0, an.s - 1.2); v.muted = false; v.volume = 1;
+  v.play().catch(() => {}); DUB.prova = true; $('#dubPlay').textContent = '⏸ Stop';
+};
+$('#dubLoop').onclick = () => { DUB.loop = !DUB.loop; $('#dubLoop').classList.toggle('on', DUB.loop); };
+$('#dubPrev').onclick = () => !S.rec && selectAnello(DUB.an - 1);
+$('#dubNext').onclick = () => !S.rec && selectAnello(DUB.an + 1);
+
+let beepCtx = null;
+function beep(freq = 1000, dur = 0.09) {
+  try {
+    beepCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+    const o = beepCtx.createOscillator(), g = beepCtx.createGain();
+    o.frequency.value = freq; g.gain.value = 0.25; o.connect(g); g.connect(beepCtx.destination);
+    o.start(); o.stop(beepCtx.currentTime + dur);
+  } catch {}
+}
+async function dubRec() {
+  stopPlayer(); stopProva();
+  const sy = S.text.sync; const an = sy.anelli[DUB.an];
+  let stream;
+  try { stream = await openMic(); } catch { alert('Non riesco ad accedere al microfono. Controlla i permessi del browser.'); return; }
+  const ctx = new (window.AudioContext || window.webkitAudioContext)(); ctx.resume?.().catch(() => {});
+  const src = ctx.createMediaStreamSource(stream);
+  const anl = ctx.createAnalyser(); anl.fftSize = 1024; src.connect(anl);
+  const buf = new Float32Array(anl.fftSize);
+  const rms = () => { anl.getFloatTimeDomainData(buf); let q = 0; for (const x of buf) q += x * x; return Math.sqrt(q / buf.length); };
+  const vs = Math.max(0, an.s - PRE);
+  const R = (S.rec = { stream, ctx, src, rms, counting: false, dub: { an: DUB.an, vs, end: an.e + 0.9 } });
+  document.body.classList.add('recording');
+  beep(1, 0.001); // sblocca l'audio
+  const v = $('#video');
+  v.pause(); v.currentTime = vs;
+  await new Promise((r) => { const f = () => r(); v.addEventListener('seeked', f, { once: true }); setTimeout(f, 800); });
+  if (S.rec !== R) return;
+  v.volume = S.guide; v.muted = S.guide === 0;
+  const mimeType = pickMime();
+  const mr = new MediaRecorder(stream, { ...(mimeType && { mimeType }), audioBitsPerSecond: S.mode === 'casa' ? 256000 : 128000 });
+  R.chunks = []; R.mr = mr; R.mime = mr.mimeType || mimeType || 'audio/webm';
+  mr.ondataavailable = (e) => e.data.size && R.chunks.push(e.data);
+  mr.start(100);
+  R.t0 = performance.now();
+  await v.play().catch(() => {});
+  R.dub.vs = v.currentTime; // posizione reale del video all'avvio
+  try { R.lock = await navigator.wakeLock?.request('screen'); } catch {}
+  // 3 bip prima dell'attacco
+  const cd = $('#dubCount');
+  for (const k of [3, 2, 1]) {
+    const at = (an.s - k - v.currentTime) * 1000;
+    if (at >= -50) setTimeout(() => { if (S.rec !== R) return; beep(k === 1 ? 1400 : 1000); cd.textContent = k; cd.hidden = false; setTimeout(() => (cd.hidden = true), 450); }, Math.max(0, at));
+  }
+  const loop = (now) => {
+    if (S.rec !== R) return;
+    $('#level').style.transform = `translate(-50%,-50%) scale(${1 + Math.min(0.6, rms() * 6)})`;
+    $('#recTime').textContent = '● ' + fmt(now - R.t0);
+    R.raf = requestAnimationFrame(loop);
+  };
+  R.raf = requestAnimationFrame(loop);
+}
+// 6. misuratore di sync: quando hai attaccato e chiuso rispetto all'originale
+async function measureSync(take, an) {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ac = new AC();
+  const b = await ac.decodeAudioData(await take.blob.arrayBuffer());
+  ac.close().catch(() => {});
+  const d = b.getChannelData(0), sr = b.sampleRate, hop = Math.round(sr * 0.01);
+  const env = [];
+  for (let i = 0; i + hop <= d.length; i += hop) { let q = 0; for (let j = i; j < i + hop; j++) q += d[j] * d[j]; env.push(Math.sqrt(q / hop)); }
+  const sorted = [...env].sort((x, y) => x - y);
+  const floor = sorted[Math.floor(sorted.length * 0.2)] || 0;
+  const thr = Math.max(0.015, floor * 4);
+  const from = Math.max(0, Math.round((an.s - take.vs - 0.6) * 100));
+  let on = -1, offI = -1;
+  for (let i = from; i < env.length - 3; i++) if (env[i] > thr && env[i + 1] > thr && env[i + 2] > thr) { on = i; break; }
+  for (let i = env.length - 1; i > on && on >= 0; i--) if (env[i] > thr && env[i - 1] > thr) { offI = i; break; }
+  if (on < 0) return null;
+  return { ds: +(take.vs + on / 100 - an.s).toFixed(2), de: offI > 0 ? +(take.vs + offI / 100 - an.e).toFixed(2) : null };
+}
+function syncWord(d, what) {
+  if (d == null) return '';
+  if (Math.abs(d) < 0.12) return `${what} perfetto`;
+  return `${what} ${Math.abs(d).toFixed(2).replace('.', ',')} s ${d > 0 ? 'in ritardo' : 'in anticipo'}`;
+}
+function syncBadge(sy) {
+  const bad = Math.max(Math.abs(sy.ds || 0), Math.abs(sy.de || 0));
+  return `<i class="sb ${bad < 0.12 ? 'ok' : bad < 0.3 ? 'mid' : 'ko'}">${bad < 0.12 ? 'in sync' : (bad < 0.3 ? '±' : '±') + bad.toFixed(1).replace('.', ',') + 's'}</i>`;
+}
+async function afterDubTake(take) {
+  const an = S.text?.sync?.anelli?.[take.anello]; if (!an) return;
+  try {
+    const r = await measureSync(take, an);
+    if (!r) { $('#ttMeta').textContent = `${fmt(take.duration)} · non sento la voce: controlla il microfono`; return; }
+    take.sync = r;
+    await DB.put('takes', strip(take));
+    if (S.lastTake?.id === take.id) $('#ttMeta').innerHTML = `${esc(syncWord(r.ds, 'Attacco'))}${r.de != null ? ' · ' + esc(syncWord(r.de, 'chiusura')) : ''}`;
+    renderAnelli();
+  } catch (e) { console.warn('sync', e); }
+}
+
+// 7. esporta il video doppiato
+async function exportDub() {
+  const t = S.text, sy = t.sync; if (!sy || S.rec) return;
+  const takes = (await DB.takesOf(t.id)).filter((k) => k.anello != null).sort((a, b) => a.createdAt - b.createdAt);
+  const pick = {};
+  for (const k of takes) if (!pick[k.anello] || k.starred || !pick[k.anello].starred) pick[k.anello] = k;
+  const chosen = Object.values(pick);
+  if (!chosen.length) { toast2('Registra almeno un anello prima di esportare.'); return; }
+  stopPlayer(); stopProva();
+  let cancel = false;
+  rpanel(`<div class="drill"><div class="dnum">Esporto il video doppiato</div><h3 id="exT">Preparo…</h3>
+    <div class="dbar"><i class="static" id="exBar" style="transform:scaleX(0)"></i></div>
+    <p class="small">${chosen.length} anelli su ${sy.anelli.length} (la take ★ preferita, altrimenti l'ultima). Il video viene registrato in tempo reale: tieni lo schermo acceso.</p>
+    <button class="cta ghost" id="exStop">Annulla</button></div>`);
+  $('#exStop').onclick = () => { cancel = true; };
+  const ac = new (window.AudioContext || window.webkitAudioContext)();
+  try {
+    const bufs = await Promise.all(chosen.map(async (k) => ({ k, b: await ac.decodeAudioData(await k.blob.arrayBuffer()) })));
+    const v = document.createElement('video');
+    v.src = URL.createObjectURL(t.video); v.playsInline = true; v.muted = false; v.crossOrigin = 'anonymous';
+    await new Promise((r, j) => { v.onloadedmetadata = r; v.onerror = () => j(new Error('video')); });
+    const scale = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight));
+    const cv = document.createElement('canvas'); cv.width = Math.round(v.videoWidth * scale / 2) * 2; cv.height = Math.round(v.videoHeight * scale / 2) * 2;
+    const g = cv.getContext('2d');
+    const dest = ac.createMediaStreamDestination();
+    const orig = ac.createMediaElementSource(v); const og = ac.createGain(); og.gain.value = S.guide; orig.connect(og); og.connect(dest);
+    const stream = new MediaStream([...cv.captureStream(30).getVideoTracks(), ...dest.stream.getAudioTracks()]);
+    const types = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4;codecs=avc1', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    const mimeType = types.find((x) => MediaRecorder.isTypeSupported(x)) || '';
+    const mr = new MediaRecorder(stream, { ...(mimeType && { mimeType }), videoBitsPerSecond: 4e6, audioBitsPerSecond: 192000 });
+    const parts = []; mr.ondataavailable = (e) => e.data.size && parts.push(e.data);
+    const stopped = new Promise((r) => (mr.onstop = r));
+    await ac.resume();
+    v.currentTime = 0;
+    await new Promise((r) => { v.onseeked = r; setTimeout(r, 500); });
+    mr.start(500);
+    await v.play();
+    const T0 = ac.currentTime - v.currentTime;
+    for (const { k, b } of bufs) { const s = ac.createBufferSource(); s.buffer = b; s.connect(dest); s.start(Math.max(ac.currentTime, T0 + k.vs), Math.max(0, ac.currentTime - (T0 + k.vs))); }
+    await new Promise((res) => {
+      const draw = () => {
+        if (cancel || v.ended) return res();
+        g.drawImage(v, 0, 0, cv.width, cv.height);
+        const p = v.currentTime / (v.duration || 1);
+        $('#exBar') && ($('#exBar').style.transform = `scaleX(${p})`);
+        $('#exT') && ($('#exT').textContent = `Registro… ${Math.round(p * 100)}%`);
+        requestAnimationFrame(draw);
+      };
+      draw();
+      v.onended = res;
+    });
+    v.pause(); mr.stop(); await stopped;
+    URL.revokeObjectURL(v.src);
+    if (cancel) { rpanel(''); renderDub(); return; }
+    const out = new Blob(parts, { type: mr.mimeType || mimeType });
+    const ext2 = (mr.mimeType || mimeType).includes('mp4') ? 'mp4' : 'webm';
+    download(out, `${t.title.replace(/[^\w\- àèéìòù]/gi, '').trim() || 'doppiaggio'} - doppiato.${ext2}`);
+    rpanel(`<div class="drill done"><div class="big-check">✓</div><h3>Video esportato</h3><p>Lo trovi nei download (${(out.size / 1048576).toFixed(1)} MB, ${ext2.toUpperCase()}).</p><button class="cta" id="exOk">Ok</button></div>`);
+    $('#exOk').onclick = () => { rpanel(''); renderDub(); };
+  } catch (e) {
+    console.error(e);
+    rpanel(`<div class="drill"><h3>Esportazione non riuscita</h3><p>${esc(String(e.message || e))}</p><button class="cta" id="exOk">Ok</button></div>`);
+    $('#exOk').onclick = () => { rpanel(''); renderDub(); };
+  } finally { ac.close().catch(() => {}); }
+}
+$('#dubExport').onclick = exportDub;
 
 /* ---------- segni di dizione ---------- */
 S.diz = ls.get('diz', false);

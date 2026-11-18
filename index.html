@@ -41,7 +41,9 @@
 
   <main class="stage" id="stage">
     <div class="video-wrap" id="videoWrap" hidden>
-      <video id="video" playsinline preload="metadata"></video>
+      <video id="video" playsinline preload="auto"></video>
+      <div class="dub-count" id="dubCount" hidden>3</div>
+      <div class="band" id="band" hidden><div class="band-track" id="bandTrack"></div><div class="band-line"></div></div>
     </div>
     <div class="prompter-wrap">
       <div class="prompter" id="prompter"><div class="ptext" id="ptext"></div></div>
@@ -58,6 +60,13 @@
       <div class="follow-note" id="followNote" hidden></div>
       <div class="diz-legend" id="dizLegend" hidden><span class="dz op">è ò</span> aperta · <span class="dz cl">é ó</span> chiusa · <span class="sz">s</span> sonora · <span class="dz2">parola</span> doppia pronuncia</div>
       <div class="rpanel" id="rpanel" hidden></div>
+      <div class="dub-tools" id="dubTools" hidden>
+        <button class="mini" id="dubPrev" aria-label="Anello precedente">◀</button>
+        <button class="mini wide" id="dubPlay">▶ Prova</button>
+        <button class="mini" id="dubLoop" aria-label="Ripeti in loop">🔁</button>
+        <button class="mini" id="dubNext" aria-label="Anello successivo">▶</button>
+        <button class="mini wide" id="dubExport">💾 Esporta</button>
+      </div>
       <div class="countdown" id="countdown" hidden>3</div>
     </div>
   </main>
