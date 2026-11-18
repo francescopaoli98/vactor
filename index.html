@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#050a08">
+<title>VActor</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="logo"><span class="logo-v">V</span>Actor</div>
+    <div class="top-actions">
+      <button class="icon-btn" id="btnArchive" aria-label="Archivio">🗂️</button>
+      <button class="icon-btn" id="btnSettings" aria-label="Impostazioni">⚙️</button>
+    </div>
+  </header>
+
+  <button class="title-bar" id="btnLibrary" aria-label="Cambia testo">
+    <span class="type-chip" id="curType">🎬 Copione</span>
+    <span class="cur-title" id="curTitle">—</span>
+    <span class="chev">▾</span>
+  </button>
+
+  <main class="stage" id="stage">
+    <div class="video-wrap" id="videoWrap" hidden>
+      <video id="video" playsinline preload="metadata"></video>
+    </div>
+    <div class="prompter-wrap">
+      <div class="prompter" id="prompter"><div class="ptext" id="ptext"></div></div>
+      <div class="readline" aria-hidden="true"></div>
+      <div class="p-tools">
+        <button class="mini" id="fontDown" aria-label="Testo più piccolo">A−</button>
+        <button class="mini" id="fontUp" aria-label="Testo più grande">A+</button>
+        <button class="mini" id="speedDown" aria-label="Più lento">🐢</button>
+        <span class="speed" id="speedVal">40</span>
+        <button class="mini" id="speedUp" aria-label="Più veloce">🐇</button>
+      </div>
+      <div class="countdown" id="countdown" hidden>3</div>
+    </div>
+  </main>
+
+  <div class="take-toast" id="takeToast" hidden>
+    <button class="tt-play" id="ttPlay">▶</button>
+    <div class="tt-info"><b id="ttName">Take 1</b><span id="ttMeta">0:00</span></div>
+    <button class="tt-btn" id="ttStar" aria-label="Preferita">☆</button>
+    <button class="tt-btn" id="ttAll">Tutte</button>
+  </div>
+
+  <footer class="dock">
+    <button class="dock-side" id="btnNew"><span class="ds-ico">＋</span><span>Nuovo</span></button>
+    <div class="rec-zone">
+      <div class="level" id="level"></div>
+      <button class="rec" id="btnRec" aria-label="Registra"><span class="rec-core"></span></button>
+      <div class="rec-time" id="recTime">tocca per registrare</div>
+    </div>
+    <button class="dock-side" id="btnTakes"><span class="ds-ico" id="takeCount">0</span><span>Take</span></button>
+  </footer>
+  <div class="mode-row">
+    <button class="mode" id="btnMode">🏠 Casa · audio puro</button>
+    <label class="guide" id="guideRow" hidden>🔊 voce originale <input type="range" id="guideVol" min="0" max="1" step="0.05"></label>
+  </div>
+</div>
+
+<!-- NUOVO TESTO -->
+<dialog class="sheet" id="sheetNew">
+  <div class="sheet-head"><h2 id="newTitle">Nuovo testo</h2><button class="x" data-close>✕</button></div>
+  <div class="drop" id="drop">
+    <label class="big-pick">
+      <input type="file" id="fileIn" multiple accept="video/*,image/*,application/pdf,text/plain,.txt,.srt,.md">
+      <span class="bp-ico">📥</span>
+      <span><b>Carica file</b><small>video, screenshot, PDF, testo (anche più insieme)</small></span>
+    </label>
+    <button class="paste-btn" id="btnPaste">📋 Incolla</button>
+  </div>
+  <div class="status" id="newStatus"></div>
+  <div class="attach" id="attach" hidden></div>
+  <input class="in" id="newName" placeholder="Titolo (facoltativo)">
+  <textarea class="in ta" id="newBody" placeholder="…oppure scrivi o incolla qui il testo"></textarea>
+  <div class="types" id="newTypes"></div>
+  <button class="cta" id="btnSaveNew">Vai al leggio ▶</button>
+</dialog>
+
+<!-- LIBRERIA -->
+<dialog class="sheet" id="sheetLib">
+  <div class="sheet-head"><h2>I tuoi testi</h2><button class="x" data-close>✕</button></div>
+  <button class="cta ghost" id="libNew">＋ Nuovo testo</button>
+  <div class="list" id="libList"></div>
+</dialog>
+
+<!-- TAKE -->
+<dialog class="sheet" id="sheetTakes">
+  <div class="sheet-head"><h2>Take di questo testo</h2><button class="x" data-close>✕</button></div>
+  <div class="ab" id="abBox">
+    <div class="ab-row">
+      <span class="ab-tag a">A</span><select id="abA"></select>
+      <span class="ab-tag b">B</span><select id="abB"></select>
+    </div>
+    <div class="ab-row">
+      <button class="cta small" id="abPlay">▶ Confronta</button>
+      <button class="cta small ghost" id="abSwitch">Ora: A — passa a B ⇄</button>
+    </div>
+    <small class="hint">Passi da A a B nello stesso punto della frase: senti subito la differenza.</small>
+  </div>
+  <div class="list" id="takeList"></div>
+</dialog>
+
+<!-- ARCHIVIO -->
+<dialog class="sheet" id="sheetArchive">
+  <div class="sheet-head"><h2>Archivio</h2><button class="x" data-close>✕</button></div>
+  <div class="stats" id="stats"></div>
+  <div class="list" id="archList"></div>
+</dialog>
+
+<!-- IMPOSTAZIONI -->
+<dialog class="sheet" id="sheetSettings">
+  <div class="sheet-head"><h2>Impostazioni</h2><button class="x" data-close>✕</button></div>
+  <label class="field">🎙️ Microfono
+    <select id="micSel"><option value="">Predefinito</option></select>
+  </label>
+  <small class="hint">Sul computer scegli qui il tuo microfono USB professionale.</small>
+  <div class="field">💾 Spazio usato <b id="storage">—</b></div>
+  <div class="field soon">☁️ Copia su Google Drive <span class="pill">prossima fase</span></div>
+  <div class="field soon">🔔 Promemoria per giorno della settimana <span class="pill">prossima fase</span></div>
+  <button class="cta ghost" id="btnInstall" hidden>📲 Installa sul telefono</button>
+  <small class="hint">VActor · Fase 1 «La Cabina»</small>
+</dialog>
+
+<script src="app.js" type="module"></script>
+</body>
+</html>
