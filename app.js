@@ -2036,7 +2036,7 @@ $('#chatClear').onclick = () => { if (!confirm('Cancellare la conversazione? (Le
 $('#btnChat').onclick = () => openChat();
 
 /* ---------- backup su Google Drive ---------- */
-const GD_DEFAULT_CLIENT = '';
+const GD_DEFAULT_CLIENT = '850459069167-um4pv9vtnoniap3int1pao0hff6ifg6r.apps.googleusercontent.com';
 const GD_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const GDAPI = 'https://www.googleapis.com/drive/v3';
 const GDUP = 'https://www.googleapis.com/upload/drive/v3';
