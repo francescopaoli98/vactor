@@ -429,3 +429,47 @@ input.sw:checked::after{left:21px;background:#04140c}
 .gd-toast b{color:var(--neon);font-weight:500}
 #rDrive .cta{margin:4px 0 14px}
 .cta:disabled{opacity:.5}
+
+/* ---------- Fase 5 ---------- */
+.arch-tabs{display:flex;gap:8px;margin-bottom:10px}.arch-tabs .cta{flex:1}
+.dlv-take{padding:12px 14px;border-radius:14px;background:var(--panel);border:1px solid var(--line);font-size:14px}
+.dlv-take b{font-weight:500}.dlv-take small{display:block;color:var(--muted);font-size:12px}
+.presets{display:flex;gap:6px;flex-wrap:wrap}
+.pre{padding:8px 12px;border-radius:12px;background:var(--panel);border:1px solid var(--line);font-size:13px;text-align:left}
+.pre small{display:block;font-size:11px;color:var(--muted)}
+.pre.on{border-color:var(--neon);background:#2bff8a12}
+.chk{display:flex;gap:10px;align-items:flex-start;padding:10px 2px;border-bottom:1px solid var(--line);font-size:14px;line-height:1.45}
+.chk .s{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:12px;flex:none;margin-top:1px}
+.chk.ok .s{background:#2bff8a22;color:var(--neon)}.chk.ko .s{background:#ff6b8b22;color:#ff6b8b}
+.chk small{display:block;color:var(--muted);font-size:13px}.chk.ko small{color:#ffb3b3}
+#sheetDeliver .pr-fix,#sheetDeliver .hint{margin-top:10px}
+.reel-meter{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+.reel-meter b{font-family:var(--display);font-weight:500;font-size:26px}.reel-meter b.warn{color:#ffb347}
+.reel-meter span{font-size:13px;color:var(--muted)}
+.reel-wave{height:30px;border-radius:10px;background:var(--panel);border:1px solid var(--line);display:flex;gap:3px;padding:6px;margin-bottom:6px;align-items:stretch}
+.reel-wave i{border-radius:4px;opacity:.85}
+.reel-wave .hint{margin:0;align-self:center}
+.clip{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:14px;background:var(--panel);border:1px solid var(--line);margin-bottom:6px;touch-action:pan-y}
+.clip.drag{border-color:var(--neon);background:#2bff8a12}
+.grip{color:var(--muted);font-size:16px;padding:6px 4px;cursor:grab;touch-action:none;user-select:none}
+.clip .m{flex:1;min-width:0}.clip b{display:block;font-weight:500;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.clip small{font-size:12px;color:var(--muted)}
+.chip{font-size:11px;padding:2px 8px;border-radius:99px;margin-right:6px}
+.chip.c1{background:#2bff8a1a;color:var(--neon)}.chip.c2{background:#00e0c61a;color:var(--teal)}.chip.c3{background:#b6ff3b1a;color:var(--lime)}.chip.c4{background:#ffb3471a;color:#ffb347}
+.clip .pl{width:32px;height:32px;border-radius:50%;background:var(--neon);color:#04140c;font-size:12px;flex:none}
+.clip .rm{color:var(--muted);font-size:13px;padding:4px}
+.reel-add{display:block;width:100%;text-align:center;padding:11px;border-radius:14px;border:1px dashed var(--line2);color:var(--neon);font-size:14px;margin:4px 0 10px}
+.reel-pick{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;max-height:40dvh;overflow:auto}
+.pick{text-align:left;padding:10px 12px;border-radius:12px;background:#050a08;border:1px solid var(--line);font-size:14px}
+.pick small{display:block;color:var(--muted);font-size:12px}
+.wk-days{display:flex;gap:6px;margin-top:10px}
+.wk-days span{flex:1;text-align:center;font-size:11px;color:var(--muted)}
+.wk-days i{display:block;height:28px;border-radius:8px;background:#ffffff10;margin-bottom:3px}
+.wk-days i.on{background:var(--neon)}.wk-days i.half{background:#2bff8a55}
+.wk-li{font-size:14px;line-height:1.5;padding:5px 0;color:var(--text)}.wk-li.muted{color:var(--muted)}
+.wk-rep{display:flex;justify-content:space-between;gap:10px;font-size:14px;padding:8px 0;border-bottom:1px solid var(--line)}
+.wk-rep small{color:var(--muted)}.wk-rep span:last-child{color:#ff6b8b;font-size:13px;white-space:nowrap}
+.wk-goal{margin:16px 0 14px;padding:12px 14px;border-radius:14px;background:var(--panel2);border:1px solid var(--line2);font-size:15px;line-height:1.5}
+.wk-goal b{display:block;font-size:12px;font-weight:500;color:var(--lime);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px}
+
+:root{--amber:#ffb347}
+.reel-wave i{min-width:6px}

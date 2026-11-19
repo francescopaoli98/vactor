@@ -39,3 +39,8 @@ La tua cabina personale di lettura, dizione e doppiaggio. È una web app che si 
 **Backup su Google Drive**
 - Cartella «VActor» sul tuo Drive con registrazioni, testi, report del coach e impostazioni (non la chiave Gemini). Permesso `drive.file`: l'app vede solo i file che ha creato.
 - Backup incrementale, automatico a fine allenamento, video facoltativi; ripristino su un telefono nuovo.
+
+**Fase 5 «Verso il lavoro»**
+- Demo reel: aggiungi le take ★, riordina trascinando, durata ideale 1:00–1:30; esportazione in MP3 con silenzi tagliati e volume uniforme.
+- Consegna al cliente: preset Spot/web, Audiolibro (standard ACX) e Doppiaggio (48 kHz); controllo tecnico (volume, distorsione, silenzi, rumore di fondo) con «Come si fa»; WAV 24 bit o MP3 192 kbps ([lamejs](https://github.com/zhuker/lamejs), LGPL).
+- Report della domenica: minuti, allenamenti, giorni, cosa è migliorato, errori che tornano e obiettivo della settimana scritto dal coach.

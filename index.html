@@ -141,6 +141,7 @@
 <!-- ARCHIVIO -->
 <dialog class="sheet" id="sheetArchive">
   <div class="sheet-head"><h2>Archivio</h2><button class="x" data-close>✕</button></div>
+  <div class="arch-tabs"><button class="cta small" id="openReel">🎬 Demo reel</button><button class="cta small ghost" id="openWeek">📈 La tua settimana</button></div>
   <div class="stats" id="stats"></div>
   <div class="list" id="archList"></div>
 </dialog>
@@ -163,6 +164,40 @@
     <textarea id="chatIn" rows="1" placeholder="Es. sento che apro troppo le e…"></textarea>
     <button class="chat-send" id="chatSend" aria-label="Invia">➤</button>
   </div>
+</dialog>
+
+<!-- CONSEGNA -->
+<dialog class="sheet" id="sheetDeliver">
+  <div class="sheet-head sticky"><div><h2>📦 Prepara la consegna</h2><small class="co-sub">da qualsiasi take, con un tocco</small></div><button class="x" data-close>✕</button></div>
+  <div class="dlv-take" id="dlvTake"></div>
+  <div class="gd-lbl">Per cosa serve</div>
+  <div class="presets" id="dlvPresets"></div>
+  <div class="gd-lbl">Controllo tecnico</div>
+  <div id="dlvChecks"></div>
+  <div class="pr-fix" id="dlvFix" hidden></div>
+  <small class="hint" id="dlvTech"></small>
+  <div class="gd-lbl">Scarica</div>
+  <div class="gd-row"><button class="cta" id="dlvWav">⬇️ WAV</button><button class="cta ghost" id="dlvMp3">⬇️ MP3</button></div>
+</dialog>
+
+<!-- DEMO REEL -->
+<dialog class="sheet" id="sheetReel">
+  <div class="sheet-head sticky"><div><h2>🎬 Demo reel</h2><small class="co-sub">Il mio reel</small></div><button class="x" data-close>✕</button></div>
+  <div class="reel-meter"><b id="reelTot">0:00</b><span>durata ideale 1:00 – 1:30</span></div>
+  <div class="reel-wave" id="reelWave"></div>
+  <small class="hint">Le migliori prima: chi ascolta decide nei primi 10 secondi. Trascina ⋮⋮ per cambiare l'ordine.</small>
+  <div class="gd-lbl">Ordine del reel</div>
+  <div id="reelList"></div>
+  <button class="reel-add" id="reelAdd">＋ Aggiungi dalle take ★ preferite</button>
+  <div class="reel-pick" id="reelPick" hidden></div>
+  <div class="gd-row"><button class="cta" id="reelExport">⬇️ Esporta reel</button><button class="cta ghost" id="reelPlayAll">▶ Ascolta tutto</button></div>
+</dialog>
+
+<!-- REPORT DELLA SETTIMANA -->
+<dialog class="sheet" id="sheetWeek">
+  <div class="sheet-head sticky"><div><h2>📈 La tua settimana</h2><small class="co-sub" id="weekSub"></small></div><button class="x" data-close>✕</button></div>
+  <div id="weekBody"></div>
+  <button class="cta" id="weekGo">▶ Inizia l'allenamento</button>
 </dialog>
 
 <!-- IMPOSTAZIONI -->

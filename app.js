@@ -688,7 +688,7 @@ function takeRow(k, title) {
       <small>${fmt(k.duration)} · ${k.mode === 'fuori' ? '🌳 fuori' : '🏠 casa'} · ${d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} ${d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</small></div>
     <button class="act coach" data-coach="${k.id}">🧠${k.coach?.count != null ? `<sup>${k.coach.count}</sup>` : ''}</button>
     <button class="act ${k.starred ? 'on' : ''}" data-star="${k.id}">${k.starred ? '★' : '☆'}</button>
-    <button class="act" data-dl="${k.id}">⬇️</button>
+    <button class="act" data-dl="${k.id}" aria-label="Prepara per il cliente">📦</button>
     <button class="act" data-rm="${k.id}">🗑️</button>
   </div>`;
 }
@@ -718,7 +718,7 @@ async function takeListClick(e, after) {
     b.textContent = k.starred ? '★' : '☆'; b.classList.toggle('on', k.starred);
     if (S.lastTake?.id === id) { S.lastTake.starred = k.starred; $('#ttStar').textContent = k.starred ? '★' : '☆'; }
   } else if (b.dataset.dl) {
-    const t = await DB.get('texts', k.textId); download(k.blob, fileName(k, t?.title));
+    return openDeliver(id);
   } else if (b.dataset.rm) {
     if (!confirm('Eliminare questa take?')) return;
     stopPlayer(); await DB.del('takes', id);
@@ -2235,6 +2235,347 @@ async function gdAfterRoutine() {
 }
 if (GD.on && GD.client) setTimeout(() => gdLoad().catch(() => {}), 3000);
 paintDrive();
+
+/* ---------- Fase 5: verso il lavoro ---------- */
+// --- elaborazione audio comune ---
+const PRESETS = {
+  web: { label: 'Spot / web', sub: 'volume standard web', sr: 48000, rms: -16, peak: -1, floor: -50, head: 0.4, tail: 0.6 },
+  acx: { label: 'Audiolibro', sub: 'standard ACX/Audible', sr: 44100, rms: -20, peak: -3.5, floor: -60, head: 0.7, tail: 2 },
+  dub: { label: 'Doppiaggio', sub: 'WAV 48 kHz', sr: 48000, rms: -23, peak: -1, floor: -55, head: 0.3, tail: 0.5 },
+};
+const db2 = (x) => 20 * Math.log10(Math.max(1e-9, x));
+async function renderMono(blob, sr, highpass) {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ac = new AC(); const buf = await ac.decodeAudioData(await blob.arrayBuffer()); ac.close().catch(() => {});
+  const off = new OfflineAudioContext(1, Math.ceil(buf.duration * sr), sr);
+  const src = off.createBufferSource(); src.buffer = buf;
+  let node = src;
+  if (highpass) { const f = off.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 80; node.connect(f); node = f; }
+  node.connect(off.destination); src.start();
+  return (await off.startRendering()).getChannelData(0).slice();
+}
+function frames(pcm, sr, ms = 50) {
+  const hop = Math.round((sr * ms) / 1000), out = [];
+  for (let i = 0; i + hop <= pcm.length; i += hop) { let q = 0; for (let j = i; j < i + hop; j++) q += pcm[j] * pcm[j]; out.push(Math.sqrt(q / hop)); }
+  return { env: out, hop };
+}
+function audioStats(pcm, sr) {
+  const { env, hop } = frames(pcm, sr);
+  const sorted = [...env].sort((a, b) => a - b);
+  const floor = sorted[Math.floor(sorted.length * 0.1)] || 1e-6;
+  const thr = Math.max(floor * 4, 0.003);
+  const voiced = env.filter((x) => x > thr);
+  const rms = voiced.length ? Math.sqrt(voiced.reduce((a, x) => a + x * x, 0) / voiced.length) : 1e-6;
+  let peak = 0, clip = 0; for (const x of pcm) { const v = Math.abs(x); if (v > peak) peak = v; if (v > 0.985) clip++; }
+  let first = env.findIndex((x) => x > thr), last = env.length - 1; while (last > 0 && env[last] <= thr) last--;
+  return { rmsDb: db2(rms), peakDb: db2(peak), floorDb: db2(floor), clipped: clip > pcm.length * 0.0003, start: Math.max(0, first) * hop, end: (last + 1) * hop, thr };
+}
+function limiter(pcm, ceilDb, sr) {
+  const ceil = Math.pow(10, ceilDb / 20), rel = Math.exp(-1 / (0.08 * sr));
+  let g = 1;
+  for (let i = 0; i < pcm.length; i++) {
+    const a = Math.abs(pcm[i]) * g;
+    if (a > ceil) g = ceil / Math.abs(pcm[i]); else g = 1 - (1 - g) * rel;
+    pcm[i] *= g;
+  }
+  return pcm;
+}
+// riduce il rumore tra una frase e l'altra (espansore dolce, senza tagli netti)
+function gentleGate(pcm, sr, thr, depthDb = 12) {
+  const { env, hop } = frames(pcm, sr, 20);
+  const low = Math.pow(10, -depthDb / 20);
+  let g = 1;
+  for (let k = 0; k < env.length; k++) {
+    const target = env[k] > thr * 1.5 ? 1 : low;
+    for (let i = k * hop; i < (k + 1) * hop; i++) { g += (target - g) * (target > g ? 0.02 : 0.0015); pcm[i] *= g; }
+  }
+  return pcm;
+}
+async function processTake(blob, preset) {
+  const P = PRESETS[preset];
+  const raw = await renderMono(blob, P.sr, true);
+  const before = audioStats(raw, P.sr);
+  const s0 = Math.max(0, before.start - Math.round(P.head * P.sr)), s1 = Math.min(raw.length, before.end + Math.round(P.tail * P.sr));
+  let pcm = raw.slice(s0, s1);
+  const gain = Math.pow(10, (P.rms - before.rmsDb) / 20);
+  for (let i = 0; i < pcm.length; i++) pcm[i] *= gain;
+  let after = audioStats(pcm, P.sr);
+  let gated = false;
+  if (after.floorDb > P.floor) { gentleGate(pcm, P.sr, after.thr, preset === 'acx' ? 18 : 12); gated = true; }
+  limiter(pcm, P.peak, P.sr);
+  const fi = Math.min(pcm.length, Math.round(0.01 * P.sr)); for (let i = 0; i < fi; i++) { pcm[i] *= i / fi; pcm[pcm.length - 1 - i] *= i / fi; }
+  after = audioStats(pcm, P.sr);
+  return { pcm, sr: P.sr, before, after, gated, P };
+}
+function wavBlob(pcm, sr, bits = 24) {
+  const n = pcm.length, bps = bits / 8, buf = new ArrayBuffer(44 + n * bps), v = new DataView(buf);
+  const w = (o, s2) => [...s2].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * bps, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr * bps, true); v.setUint16(32, bps, true); v.setUint16(34, bits, true); w(36, 'data'); v.setUint32(40, n * bps, true);
+  for (let i = 0; i < n; i++) {
+    const x = Math.max(-1, Math.min(1, pcm[i]));
+    if (bits === 24) { const s = Math.round(x * 8388607); v.setUint8(44 + i * 3, s & 255); v.setUint8(45 + i * 3, (s >> 8) & 255); v.setUint8(46 + i * 3, (s >> 16) & 255); }
+    else v.setInt16(44 + i * 2, x * 32767, true);
+  }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+async function mp3Blob(pcm, sr, kbps = 192) {
+  if (!window.lamejs) await loadScript('lib/lame.min.js');
+  const enc = new lamejs.Mp3Encoder(1, sr, kbps);
+  const i16 = new Int16Array(pcm.length); for (let i = 0; i < pcm.length; i++) i16[i] = Math.max(-1, Math.min(1, pcm[i])) * 32767;
+  const out = [];
+  for (let i = 0; i < i16.length; i += 1152 * 20) { out.push(enc.encodeBuffer(i16.subarray(i, i + 1152 * 20))); if (i % (1152 * 400) === 0) await sleep(0); }
+  out.push(enc.flush());
+  return new Blob(out, { type: 'audio/mpeg' });
+}
+const safeName = (t) => (t || 'voce').replace(/[^\w\- àèéìòù]/gi, '').trim() || 'voce';
+
+// --- consegna al cliente ---
+const DLV = { take: null, preset: ls.get('dlvPreset', 'web'), res: null, busy: false };
+async function openDeliver(takeId) {
+  const k = await DB.get('takes', takeId); if (!k) return;
+  const t = await DB.get('texts', k.textId);
+  const n = (await DB.takesOf(k.textId)).sort((a, b) => a.createdAt - b.createdAt).findIndex((x) => x.id === k.id) + 1;
+  DLV.take = { ...k, n, title: t?.title || 'Take' };
+  $('#dlvTake').innerHTML = `<b>${esc(DLV.take.title)}${k.anello != null ? ` · anello ${k.anello + 1}` : ''} · take ${n}</b><small>${fmt(k.duration)} · registrata in ${k.mode === 'fuori' ? '🌳 Fuori' : '🏠 Casa'}</small>`;
+  open('#sheetDeliver');
+  runDeliver();
+}
+function paintPresets() {
+  $('#dlvPresets').innerHTML = Object.entries(PRESETS).map(([k, p]) => `<button class="pre ${k === DLV.preset ? 'on' : ''}" data-pre="${k}">${p.label}<small>${p.sub}</small></button>`).join('');
+}
+$('#dlvPresets').addEventListener('click', (e) => { const b = e.target.closest('[data-pre]'); if (!b || DLV.busy) return; DLV.preset = b.dataset.pre; ls.set('dlvPreset', DLV.preset); runDeliver(); });
+async function runDeliver() {
+  paintPresets();
+  DLV.busy = true; DLV.res = null;
+  $('#dlvChecks').innerHTML = '<div class="empty-note">Analizzo e preparo l\'audio…</div>'; $('#dlvFix').hidden = true;
+  try {
+    const r = await processTake(DLV.take.blob, DLV.preset);
+    DLV.res = r;
+    const P = r.P, A = r.after;
+    const checks = [
+      [Math.abs(A.rmsDb - P.rms) < 1.5, 'Volume giusto', 'sistemato in automatico', ''],
+      [!r.before.clipped, r.before.clipped ? 'Registrazione distorta' : 'Nessuna distorsione', r.before.clipped ? 'la voce era troppo forte per il microfono: non si può sistemare' : 'i picchi restano sotto il limite', 'Allontanati di una spanna dal microfono o abbassa il guadagno della scheda audio, poi registra di nuovo.'],
+      [true, 'Silenzi tagliati', `${String(P.head).replace('.', ',')} s di aria all'inizio, ${String(P.tail).replace('.', ',')} s alla fine`, ''],
+      [A.floorDb <= P.floor, A.floorDb <= P.floor ? 'Rumore di fondo basso' : 'Rumore di fondo alto', A.floorDb <= P.floor ? (r.gated ? 'ridotto in automatico tra una frase e l\'altra' : 'la stanza è silenziosa') : 'si sente il ronzio della stanza tra le frasi', 'Spegni frigo e ventilatori, registra in modalità 🏠 Casa e avvicinati al microfono di una spanna.'],
+    ];
+    $('#dlvChecks').innerHTML = checks.map(([ok, t, s]) => `<div class="chk ${ok ? 'ok' : 'ko'}"><span class="s">${ok ? '✓' : '✗'}</span><div>${t}<small>${s}</small></div></div>`).join('');
+    const bad = checks.filter((c) => !c[0]);
+    $('#dlvFix').hidden = !bad.length;
+    $('#dlvFix').innerHTML = bad.map((c) => `<b>Come si fa:</b> ${esc(c[3])}`).join('<br>');
+    $('#dlvTech').textContent = `Volume medio ${A.rmsDb.toFixed(1)} dB · picco ${A.peakDb.toFixed(1)} dB · rumore ${A.floorDb < -90 ? 'sotto -90' : A.floorDb.toFixed(0)} dB · ${P.sr / 1000} kHz`;
+  } catch (e) { console.error(e); $('#dlvChecks').innerHTML = `<div class="empty-note">Non riesco a preparare questo audio (${esc(String(e.message || e))}).</div>`; }
+  DLV.busy = false;
+}
+$('#dlvWav').onclick = () => { if (!DLV.res) return; download(wavBlob(DLV.res.pcm, DLV.res.sr, 24), `${safeName(DLV.take.title)} - take ${DLV.take.n} - ${DLV.preset}.wav`); };
+$('#dlvMp3').onclick = async () => {
+  if (!DLV.res) return; const b = $('#dlvMp3'); b.disabled = true; b.textContent = 'Preparo l\'MP3…';
+  try { download(await mp3Blob(DLV.res.pcm, DLV.res.sr === 48000 && DLV.preset !== 'acx' ? 48000 : 44100, 192), `${safeName(DLV.take.title)} - take ${DLV.take.n} - ${DLV.preset}.mp3`); }
+  catch (e) { alert('MP3 non disponibile: scarica il WAV.'); }
+  b.disabled = false; b.textContent = '⬇️ MP3';
+};
+
+// --- demo reel ---
+const REEL = { list: ls.get('reel', []), playing: null };
+const reelSave = () => ls.set('reel', REEL.list);
+function catOf(take, text) {
+  if (take.anello != null) return ['Doppiaggio', 'c4'];
+  const rd = READINGS.find((r) => r.title === text?.title);
+  const g = rd?.g || '';
+  if (/spot/i.test(g)) return ['Spot', 'c1'];
+  if (/documentario|divulgazione/i.test(g)) return ['Documentario', 'c2'];
+  if (/notiziario/i.test(g)) return ['Notiziario', 'c2'];
+  if (/learning/i.test(g)) return ['E-learning', 'c2'];
+  return { audiolibro: ['Audiolibro', 'c3'], copione: ['Recitazione', 'c4'], poesia: ['Poesia', 'c3'], articolo: ['Spot', 'c1'], dizione: ['Dizione', 'c2'] }[text?.type] || ['Lettura', 'c2'];
+}
+async function reelItems() {
+  const out = [];
+  for (const it of REEL.list) {
+    const k = await DB.get('takes', it.id); if (!k) continue;
+    const t = await DB.get('texts', k.textId);
+    const n = (await DB.takesOf(k.textId)).filter((x) => x.anello === k.anello).sort((a, b) => a.createdAt - b.createdAt).findIndex((x) => x.id === k.id) + 1;
+    out.push({ it, k, t, n, cat: catOf(k, t) });
+  }
+  return out;
+}
+async function trimInfo(it, k) {
+  if (it.len != null) return it.len;
+  try { const pcm = await renderMono(k.blob, 16000); const st = audioStats(pcm, 16000); it.len = +((st.end - st.start) / 16000 + 0.6).toFixed(1); }
+  catch { it.len = +(k.duration / 1000).toFixed(1); }
+  reelSave(); return it.len;
+}
+async function renderReel() {
+  const items = await reelItems();
+  REEL.list = items.map((x) => x.it); reelSave();
+  for (const x of items) await trimInfo(x.it, x.k);
+  const total = items.reduce((a, x) => a + (x.it.len || 0), 0);
+  $('#reelTot').textContent = `${Math.floor(total / 60)}:${String(Math.round(total % 60)).padStart(2, '0')}`;
+  $('#reelTot').classList.toggle('warn', total > 0 && (total < 45 || total > 100));
+  const colors = { c1: 'var(--neon)', c2: 'var(--teal)', c3: 'var(--lime)', c4: 'var(--amber)' };
+  $('#reelWave').innerHTML = items.length ? items.map((x) => `<i style="flex:${x.it.len || 1};background:${colors[x.cat[1]]}"></i>`).join('') : '<span class="hint">Ancora vuoto: aggiungi le tue take migliori.</span>';
+  $('#reelList').innerHTML = items.map((x, i) => {
+    const c = x.k.coach, sync = x.k.sync;
+    const judge = x.k.anello != null && sync ? (Math.max(Math.abs(sync.ds || 0), Math.abs(sync.de || 0)) < 0.12 ? 'in sync' : 'sync da migliorare') : c?.count != null ? `coach: ${c.count} ${c.count === 1 ? 'errore' : 'errori'}` : '';
+    return `<div class="clip" data-i="${i}"><span class="grip" data-grip="${i}">⋮⋮</span><div class="m"><b>${esc(x.t?.title || 'Take')}${x.k.anello != null ? ` · anello ${x.k.anello + 1}` : ''} · take ${x.n}</b>
+      <small><span class="chip ${x.cat[1]}">${x.cat[0]}</span>${dec(x.it.len || 0)} s${judge ? ' · ' + judge : ''}</small></div>
+      <button class="pl" data-rp="${i}">▶</button><button class="rm" data-rr="${i}" aria-label="Togli dal reel">✕</button></div>`;
+  }).join('');
+  $('#reelExport').disabled = !items.length; $('#reelPlayAll').disabled = !items.length;
+}
+async function openReel() { open('#sheetReel'); $('#reelPick').hidden = true; await renderReel(); }
+function stopReelAudio() { if (REEL.playing) { REEL.playing.pause(); URL.revokeObjectURL(REEL.playing.src); REEL.playing = null; } document.querySelectorAll('[data-rp]').forEach((b) => (b.textContent = '▶')); $('#reelPlayAll').textContent = '▶ Ascolta tutto'; }
+async function reelMix(onP) {
+  const items = await reelItems();
+  const SR = 44100, gap = Math.round(0.6 * SR);
+  const parts = [];
+  for (const [i, x] of items.entries()) {
+    onP?.(`Preparo la clip ${i + 1} di ${items.length}…`);
+    const r = await processTake(x.k.blob, 'web');
+    parts.push(r.pcm.length && r.sr !== SR ? await (async () => { const off = new OfflineAudioContext(1, Math.ceil((r.pcm.length / r.sr) * SR), SR); const b = off.createBuffer(1, r.pcm.length, r.sr); b.copyToChannel(r.pcm, 0); const s = off.createBufferSource(); s.buffer = b; s.connect(off.destination); s.start(); return (await off.startRendering()).getChannelData(0); })() : r.pcm);
+  }
+  const len = parts.reduce((a, p) => a + p.length + gap, 0);
+  const out = new Float32Array(len); let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length + gap; }
+  limiter(out, -1, SR);
+  return { pcm: out, sr: SR };
+}
+$('#reelList').addEventListener('click', async (e) => {
+  const rp = e.target.closest('[data-rp]'), rr = e.target.closest('[data-rr]');
+  if (rr) { stopReelAudio(); REEL.list.splice(+rr.dataset.rr, 1); reelSave(); renderReel(); return; }
+  if (rp) {
+    const was = rp.textContent === '⏸'; stopReelAudio(); if (was) return;
+    const x = (await reelItems())[+rp.dataset.rp];
+    const r = await processTake(x.k.blob, 'web');
+    const a = new Audio(URL.createObjectURL(wavBlob(r.pcm, r.sr, 16))); REEL.playing = a; a.onended = stopReelAudio; a.play(); rp.textContent = '⏸';
+  }
+});
+// trascina per riordinare
+$('#reelList').addEventListener('pointerdown', (e) => {
+  const g = e.target.closest('[data-grip]'); if (!g) return;
+  e.preventDefault();
+  const row = g.closest('.clip'); const list = $('#reelList');
+  let from = +g.dataset.grip; row.classList.add('drag');
+  const move = (ev) => {
+    const rows = [...list.children];
+    const y = ev.clientY;
+    let to = rows.findIndex((r) => { const b = r.getBoundingClientRect(); return y < b.top + b.height / 2; });
+    if (to < 0) to = rows.length - 1;
+    if (to !== from) {
+      const [it] = REEL.list.splice(from, 1); REEL.list.splice(to, 0, it);
+      list.insertBefore(row, to > from ? rows[to].nextSibling : rows[to]); from = to;
+    }
+  };
+  const up = () => { row.classList.remove('drag'); document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); reelSave(); renderReel(); };
+  document.addEventListener('pointermove', move); document.addEventListener('pointerup', up);
+});
+$('#reelAdd').onclick = async () => {
+  const box = $('#reelPick');
+  if (!box.hidden) { box.hidden = true; return; }
+  const inReel = new Set(REEL.list.map((x) => x.id));
+  const all = (await DB.all('takes')).filter((k) => !inReel.has(k.id)).sort((a, b) => (b.starred - a.starred) || b.createdAt - a.createdAt);
+  const titles = Object.fromEntries((await DB.all('texts')).map((t) => [t.id, t.title]));
+  const fav = all.filter((k) => k.starred);
+  const list = (fav.length ? fav : all).slice(0, 40);
+  box.innerHTML = (fav.length ? '' : '<div class="hint">Non hai ancora take con la ★: ecco le ultime registrazioni.</div>') +
+    list.map((k) => `<button class="pick" data-add="${k.id}">${k.starred ? '★ ' : ''}${esc(titles[k.textId] || 'Take')}${k.anello != null ? ` · anello ${k.anello + 1}` : ''}<small>${fmt(k.duration)} · ${new Date(k.createdAt).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</small></button>`).join('') || '<div class="hint">Nessuna registrazione da aggiungere.</div>';
+  box.hidden = false;
+};
+$('#reelPick').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-add]'); if (!b) return;
+  REEL.list.push({ id: b.dataset.add }); reelSave(); b.remove(); renderReel();
+});
+$('#reelPlayAll').onclick = async () => {
+  if (REEL.playing) return stopReelAudio();
+  const b = $('#reelPlayAll'); b.textContent = 'Preparo…';
+  const m = await reelMix(); const a = new Audio(URL.createObjectURL(wavBlob(m.pcm, m.sr, 16)));
+  REEL.playing = a; a.onended = stopReelAudio; a.play(); b.textContent = '⏸ Stop';
+};
+$('#reelExport').onclick = async () => {
+  const b = $('#reelExport'); b.disabled = true;
+  try {
+    const m = await reelMix((t) => (b.textContent = t));
+    b.textContent = 'Creo l\'MP3…';
+    let file, name = `Demo reel ${dayKey()}`;
+    try { file = await mp3Blob(m.pcm, m.sr, 192); name += '.mp3'; } catch { file = wavBlob(m.pcm, m.sr, 16); name += '.wav'; }
+    download(file, name);
+    b.textContent = '✓ Reel scaricato';
+    setTimeout(() => (b.textContent = '⬇️ Esporta reel'), 2500);
+  } catch (e) { console.error(e); b.textContent = '⬇️ Esporta reel'; alert('Esportazione non riuscita.'); }
+  b.disabled = false;
+};
+$('#openReel').onclick = () => openReel();
+$('#sheetReel').addEventListener('close', stopReelAudio);
+
+// --- report della domenica ---
+function weekRange(d = new Date()) {
+  const end = new Date(d); end.setHours(23, 59, 59, 999);
+  const dow = (end.getDay() + 6) % 7; // 0 = lunedì
+  const start = new Date(end); start.setDate(end.getDate() - dow); start.setHours(0, 0, 0, 0);
+  const sunday = new Date(start); sunday.setDate(start.getDate() + 6); sunday.setHours(23, 59, 59, 999);
+  return { start, end: sunday, key: dayKey(start) };
+}
+async function weekData() {
+  const { start, end, key } = weekRange();
+  const takes = (await DB.all('takes')).filter((k) => k.createdAt >= +start && k.createdAt <= +end);
+  const log = ls.get('routineLog', {});
+  const days = [...Array(7)].map((_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); const k2 = dayKey(d); return log[k2] ? 'on' : takes.some((t) => dayKey(new Date(t.createdAt)) === k2) ? 'half' : ''; });
+  const routines = days.filter((x) => x === 'on').length;
+  const mins = Math.round(takes.reduce((a, k) => a + k.duration, 0) / 60000 + routines * 2); // + respiro e articolazione
+  const better = [...new Set(takes.flatMap((k) => k.coach?.ai?.miglioramenti || []))].slice(0, 4);
+  // errori ricorrenti (raggruppati)
+  const groups = {};
+  const bump = (name, ex) => { const g = (groups[name] ||= { n: 0, ex: new Set() }); g.n++; if (ex) g.ex.add(ex); };
+  for (const k of takes) {
+    const R = k.coach?.local || {};
+    (R.rising || []).forEach(() => bump('Fine frase che sale'));
+    (R.flatQ || []).forEach(() => bump('Domande che non salgono'));
+    (R.pauseMissed || []).forEach(() => bump('Pause saltate'));
+    (R.miss || []).forEach(() => bump('Parole saltate'));
+    for (const e of k.coach?.ai?.errori || []) {
+      const name = { pronuncia: 'Pronuncia', accento: 'Accenti sbagliati', pausa_mancante: 'Pause saltate', pausa_di_troppo: 'Pause di troppo', parola_saltata: 'Parole saltate', parola_sbagliata: 'Parole sbagliate', intonazione: 'Intonazione', ritmo: 'Ritmo', interpretazione: 'Interpretazione', voce: 'Voce' }[e.tipo] || 'Altro';
+      if (e.tipo !== 'pausa_mancante' && e.tipo !== 'parola_saltata') bump(name, e.parola);
+    }
+  }
+  const errs = Object.entries(groups).sort((a, b) => b[1].n - a[1].n).slice(0, 4).map(([name, g]) => ({ name, n: g.n, ex: [...g.ex].slice(0, 2) }));
+  return { key, start, end, takes: takes.length, mins, routines, days, better, errs, allErr: takes.flatMap((k) => (k.coach?.ai?.errori || []).map((e) => `«${e.parola}»: ${e.spiegazione}`)).slice(0, 60) };
+}
+async function weekGoal(w) {
+  const cached = ls.get('weekGoal', {});
+  if (cached.key === w.key && cached.n === w.takes) return cached.goal;
+  let goal = '';
+  if (COACH.key && (w.errs.length || w.allErr.length)) {
+    try {
+      const models = await geminiModels(COACH.key);
+      const body = JSON.stringify({ contents: [{ role: 'user', parts: [{ text: `Sei il coach di dizione e doppiaggio dell'allievo, stile sergente ma semplice. Ecco gli errori della settimana:\n${w.allErr.join('\n') || w.errs.map((e) => `${e.name} (${e.n} volte)`).join('\n')}\n\nCose da ricordare sull'allievo:\n${notesText()}\n\nScrivi l'OBIETTIVO DELLA SETTIMANA PROSSIMA: una sola cosa su cui concentrarsi e un esercizio quotidiano concreto. Massimo 35 parole, frasi semplici, niente markdown.` }] }], generationConfig: { temperature: 0.4 } });
+      for (const model of models) {
+        const r = await fetch(`${GAPI}/models/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': COACH.key }, body });
+        if (!r.ok) continue;
+        goal = ((await r.json()).candidates?.[0]?.content?.parts?.map((x) => x.text || '').join('') || '').trim(); bumpCoachCount(); break;
+      }
+    } catch {}
+  }
+  if (!goal && w.errs[0]) goal = { 'Fine frase che sale': 'Chiudere le frasi scendendo con la voce. Ogni giorno 3 frasi lette lente, con l\'ultima parola più bassa.', 'Pause saltate': 'Rispettare le barre. Ogni giorno una lettura in cui sulla barra chiudi la bocca e respiri dal naso.', 'Domande che non salgono': 'Far salire le domande. Ogni giorno 5 domande lette con l\'ultima parola più alta, come se fossi sorpreso.', 'Parole saltate': 'Non saltare niente. Prima di registrare rileggi il testo a bassa voce, una volta intera.' }[w.errs[0].name] || `Lavorare su: ${w.errs[0].name.toLowerCase()}. Ogni giorno 5 minuti sulle parole dove sbagli.`;
+  if (!goal) goal = 'Registrare almeno 5 giorni su 7: senza registrazioni il coach non può misurare i progressi.';
+  ls.set('weekGoal', { key: w.key, n: w.takes, goal });
+  return goal;
+}
+async function openWeek() {
+  open('#sheetWeek');
+  const w = await weekData();
+  const f = (d) => d.toLocaleDateString('it-IT', { day: 'numeric', month: 'long' });
+  $('#weekSub').textContent = `${w.start.getDate()} – ${f(w.end)}`;
+  $('#weekBody').innerHTML = `<div class="stats"><div><b>${w.mins || (w.takes ? '<1' : 0)}</b><small>minuti in cabina</small></div><div><b>${w.routines}</b><small>allenamenti</small></div><div><b>${w.takes}</b><small>registrazioni</small></div></div>
+    <div class="wk-days">${['L', 'M', 'M', 'G', 'V', 'S', 'D'].map((d, i) => `<span><i class="${w.days[i]}"></i>${d}</span>`).join('')}</div>
+    <div class="gd-lbl">Cosa è migliorato</div>${w.better.length ? w.better.map((b) => `<div class="wk-li">✓ ${esc(b)}</div>`).join('') : '<div class="wk-li muted">Ancora niente di misurato: rileggi gli stessi testi e il coach confronterà le volte.</div>'}
+    <div class="gd-lbl">Errori che tornano</div>${w.errs.length ? w.errs.map((e) => `<div class="wk-rep"><span>${esc(e.name)}${e.ex.length ? ` <small>(${e.ex.map((x) => '«' + esc(x) + '»').join(', ')})</small>` : ''}</span><span>${e.n} ${e.n === 1 ? 'volta' : 'volte'}</span></div>`).join('') : '<div class="wk-li muted">Nessun errore registrato questa settimana.</div>'}
+    <div class="wk-goal"><b>Obiettivo della settimana</b><span id="weekGoal">Il coach sta scrivendo…</span></div>`;
+  $('#weekGoal').textContent = await weekGoal(w);
+  ls.set('weekSeen', w.key);
+}
+$('#openWeek').onclick = () => openWeek();
+$('#weekGo').onclick = () => { $('#sheetWeek').close(); startRoutine(); };
+// la domenica si apre da solo
+setTimeout(() => { if (new Date().getDay() === 0 && ls.get('weekSeen', '') !== weekRange().key && !S.rec && !RT.on && !document.querySelector('dialog[open]')) openWeek(); }, 2500);
 
 /* ---------- avvio ---------- */
 applyPrefs();
