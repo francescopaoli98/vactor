@@ -1394,6 +1394,7 @@ async function finishRoutine(plan) {
   }
   rpanel(`<div class="drill done"><div class="big-check">✓</div><h3>Fatto, ottimo lavoro.</h3>
     <p>${days === 1 ? 'Primo giorno di allenamento.' : `${days} giorni di allenamento in tutto.`} Le registrazioni sono nell'archivio.</p>${ab}
+    <div id="rDrive"></div>
     <div class="co-list" id="rCoach"></div>
     <button class="cta" id="rEnd">Chiudi</button></div>`);
   const rtk = (await DB.all('takes')).filter((k) => k.createdAt >= RT.t0).sort((a, b) => a.createdAt - b.createdAt);
@@ -1406,6 +1407,7 @@ async function finishRoutine(plan) {
     if (e.target.id === 'rEnd') endRoutine();
   };
   $('#rNext').hidden = true;
+  gdAfterRoutine();
 }
 function endRoutine() {
   RT.on = false; RT.abort = true;
@@ -2032,6 +2034,207 @@ $('#chatNotes').addEventListener('click', (e) => {
 });
 $('#chatClear').onclick = () => { if (!confirm('Cancellare la conversazione? (Le cose che il coach sa di te restano.)')) return; CHAT.hist = []; ls.set('chat', []); renderChat(); };
 $('#btnChat').onclick = () => openChat();
+
+/* ---------- backup su Google Drive ---------- */
+const GD_DEFAULT_CLIENT = '';
+const GD_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const GDAPI = 'https://www.googleapis.com/drive/v3';
+const GDUP = 'https://www.googleapis.com/upload/drive/v3';
+const GD = {
+  client: ls.get('gdClient', '') || GD_DEFAULT_CLIENT, token: null, exp: 0, tc: null, pending: null,
+  on: ls.get('gdOn', false), auto: ls.get('gdAuto', true), video: ls.get('gdVideo', false),
+  state: ls.get('gdState', {}), map: ls.get('gdMap', {}), busy: false,
+};
+const gdSave = () => { ls.set('gdState', GD.state); ls.set('gdMap', GD.map); ls.set('gdOn', GD.on); };
+function gdLoad() { return window.google?.accounts?.oauth2 ? Promise.resolve() : loadScript('https://accounts.google.com/gsi/client'); }
+function gdTokenValid() { return GD.token && Date.now() < GD.exp - 60000; }
+// chiede il permesso a Google (popup): va chiamata da un tocco dell'utente
+function gdAuth(consent) {
+  if (gdTokenValid()) return Promise.resolve(GD.token);
+  if (!GD.client) return Promise.reject(new Error('manca l\'ID client di Google'));
+  if (!window.google?.accounts?.oauth2) return Promise.reject(new Error('Google non è ancora pronto, riprova tra un secondo'));
+  return new Promise((res, rej) => {
+    GD.tc = google.accounts.oauth2.initTokenClient({
+      client_id: GD.client, scope: GD_SCOPE,
+      callback: (r) => {
+        if (r.error || !r.access_token) return rej(new Error(r.error_description || r.error || 'accesso negato'));
+        GD.token = r.access_token; GD.exp = Date.now() + (r.expires_in || 3600) * 1000; res(GD.token);
+      },
+      error_callback: (e) => rej(new Error(e?.type === 'popup_closed' ? 'finestra di Google chiusa' : e?.message || 'accesso non riuscito')),
+    });
+    GD.tc.requestAccessToken({ prompt: consent || !GD.on ? 'consent' : '' });
+  });
+}
+async function gdFetch(url, opt = {}) {
+  const r = await fetch(url, { ...opt, headers: { ...(opt.headers || {}), Authorization: `Bearer ${GD.token}` } });
+  if (r.status === 401) { GD.token = null; throw new Error('accesso a Google scaduto: tocca di nuovo «Salva ora»'); }
+  if (!r.ok) throw new Error(`Google Drive: errore ${r.status}`);
+  return r;
+}
+async function gdFolder() {
+  if (GD.state.folder) {
+    try { const r = await gdFetch(`${GDAPI}/files/${GD.state.folder}?fields=id,trashed`); const j = await r.json(); if (!j.trashed) return GD.state.folder; } catch {}
+  }
+  const q = encodeURIComponent("name='VActor' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+  const found = await (await gdFetch(`${GDAPI}/files?q=${q}&fields=files(id)&spaces=drive`)).json();
+  if (found.files?.length) { GD.state.folder = found.files[0].id; return GD.state.folder; }
+  const made = await (await gdFetch(`${GDAPI}/files?fields=id`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'VActor', mimeType: 'application/vnd.google-apps.folder' }) })).json();
+  GD.state.folder = made.id; return made.id;
+}
+async function gdFind(name, folder) {
+  const q = encodeURIComponent(`name='${name}' and '${folder}' in parents and trashed=false`);
+  const j = await (await gdFetch(`${GDAPI}/files?q=${q}&fields=files(id)&spaces=drive`)).json();
+  return j.files?.[0]?.id || null;
+}
+async function gdUpload(blob, name, folder, existingId) {
+  const type = blob.type || 'application/octet-stream';
+  const meta = existingId ? {} : { name, parents: [folder] };
+  const start = await gdFetch(existingId ? `${GDUP}/files/${existingId}?uploadType=resumable` : `${GDUP}/files?uploadType=resumable&fields=id`, {
+    method: existingId ? 'PATCH' : 'POST',
+    headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': type, 'X-Upload-Content-Length': String(blob.size) },
+    body: JSON.stringify(meta),
+  });
+  const loc = start.headers.get('Location');
+  if (!loc) throw new Error('Google Drive non ha accettato il caricamento');
+  const r = await gdFetch(loc, { method: 'PUT', headers: { 'Content-Type': type }, body: blob });
+  const j = await r.json().catch(() => ({}));
+  return j.id || existingId;
+}
+const takeFileName = (k) => `take-${k.id}.${ext(k.mime || 'audio/webm')}`;
+const videoExt = (b) => (/mp4/.test(b.type) ? 'mp4' : /quicktime/.test(b.type) ? 'mov' : 'webm');
+function gdMsg(t) { const m = $('#gdMsg'); if (m) m.textContent = t || ''; }
+// backup incrementale: carica solo ciò che manca, poi l'indice dei dati
+async function gdBackup(onMsg = gdMsg) {
+  if (GD.busy) return null;
+  GD.busy = true; paintDrive();
+  try {
+    const [texts, takes] = await Promise.all([DB.all('texts'), DB.all('takes')]);
+    const folder = await gdFolder();
+    if (!takes.length && !Object.keys(GD.map).length && (await gdFind('vactor-data.json', folder))) throw new Error('su Drive c\'è già un backup e qui il telefono è vuoto: usa prima «Ripristina»');
+    let nNew = 0;
+    const todo = takes.filter((k) => !GD.map[k.id]);
+    for (const [i, k] of todo.entries()) {
+      onMsg(`Carico le registrazioni… ${i + 1} di ${todo.length}`);
+      GD.map[k.id] = await gdUpload(k.blob, takeFileName(k), folder); nNew++;
+      if (i % 5 === 4) gdSave();
+    }
+    if (GD.video) for (const t of texts.filter((x) => x.video && !GD.map['v-' + x.id])) {
+      onMsg(`Carico il video «${t.title}»…`);
+      GD.map['v-' + t.id] = await gdUpload(t.video, `video-${t.id}.${videoExt(t.video)}`, folder);
+    }
+    // registrazioni eliminate su questo telefono: le tolgo anche da Drive
+    const alive = new Set([...takes.map((k) => k.id), ...texts.map((t) => 'v-' + t.id)]);
+    for (const [id, fid] of Object.entries(GD.map)) if (!alive.has(id)) { try { await gdFetch(`${GDAPI}/files/${fid}`, { method: 'DELETE' }); } catch {} delete GD.map[id]; }
+    onMsg('Salvo l\'indice…');
+    const data = {
+      app: 'VActor', version: 1, at: Date.now(),
+      texts: texts.map(({ video, ...t }) => ({ ...t, hasVideo: !!video, videoFile: GD.map['v-' + t.id] || null, videoName: t.videoName || null, videoType: video?.type || null })),
+      takes: takes.map(({ blob, n, ...k }) => ({ ...k, file: GD.map[k.id] })),
+      settings: Object.fromEntries(['chat', 'coachNotes', 'routineLog', 'remind', 'coachCount', 'font', 'speed', 'mode', 'diz', 'follow2', 'coachModel', 'coachAuto'].map((x) => [x, ls.get(x, null)])),
+    };
+    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    GD.state.index = await gdUpload(blob, 'vactor-data.json', folder, GD.state.index || (await gdFind('vactor-data.json', folder)));
+    try { const a = await (await gdFetch(`${GDAPI}/about?fields=storageQuota`)).json(); GD.state.quota = a.storageQuota; } catch {}
+    GD.state.last = Date.now(); GD.state.counts = { takes: takes.length, texts: texts.length };
+    gdSave();
+    onMsg(nNew ? `✓ Salvate ${nNew} nuove registrazioni su Drive` : '✓ Tutto già salvato su Drive');
+    return nNew;
+  } finally { GD.busy = false; paintDrive(); }
+}
+async function gdRestore() {
+  if (GD.busy) return;
+  GD.busy = true; paintDrive();
+  try {
+    const folder = await gdFolder();
+    const idx = await gdFind('vactor-data.json', folder);
+    if (!idx) throw new Error('su questo Drive non c\'è ancora nessun backup di VActor');
+    gdMsg('Leggo il backup…');
+    const data = await (await gdFetch(`${GDAPI}/files/${idx}?alt=media`)).json();
+    GD.state.index = idx;
+    let nt = 0, nk = 0;
+    const local = await DB.all('texts'), remap = {};
+    for (const t of data.texts || []) {
+      if (await DB.get('texts', t.id)) continue;
+      const twin = local.find((x) => x.title === t.title && (x.body || '') === (t.body || '') && !x.video === !t.hasVideo);
+      if (twin) { remap[t.id] = twin.id; continue; } // stesso testo già presente (es. quelli di esempio)
+      const { hasVideo, videoFile, videoType, ...rest } = t;
+      let video = null;
+      if (videoFile) { gdMsg(`Scarico il video «${t.title}»…`); video = await (await gdFetch(`${GDAPI}/files/${videoFile}?alt=media`)).blob(); if (videoType) video = new Blob([video], { type: videoType }); GD.map['v-' + t.id] = videoFile; }
+      await DB.put('texts', { ...rest, video }); nt++;
+    }
+    const takes = data.takes || [];
+    for (const [i, k] of takes.entries()) {
+      if (await DB.get('takes', k.id) || !k.file) continue;
+      gdMsg(`Scarico le registrazioni… ${i + 1} di ${takes.length}`);
+      const b = await (await gdFetch(`${GDAPI}/files/${k.file}?alt=media`)).blob();
+      const { file, ...rest } = k;
+      await DB.put('takes', { ...rest, textId: remap[rest.textId] || rest.textId, blob: new Blob([b], { type: k.mime || 'audio/webm' }) });
+      GD.map[k.id] = k.file; nk++;
+    }
+    for (const [key, v] of Object.entries(data.settings || {})) if (v != null && ls.get(key, null) == null) ls.set(key, v);
+    GD.on = true; GD.state.last = data.at; gdSave();
+    gdMsg(`✓ Ripristinati ${nt} testi e ${nk} registrazioni`);
+    const all = (await DB.all('texts')).sort((a, b) => b.lastUsed - a.lastUsed);
+    if (all[0]) await selectText(S.text?.id || all[0].id);
+    CHAT.hist = ls.get('chat', []); CHAT.notes = ls.get('coachNotes', []);
+    paintRoutineBtn();
+  } finally { GD.busy = false; paintDrive(); }
+}
+function fmtGB(b) { const g = b / 1073741824; return g >= 1 ? `${dec(g)} GB` : `${Math.round(b / 1048576)} MB`; }
+function paintDrive() {
+  if (!$('#gdBox')) return;
+  $('#gdClientRow').hidden = !!GD_DEFAULT_CLIENT || (GD.on && !!GD.client);
+  $('#gdOff').hidden = GD.on; $('#gdOn').hidden = !GD.on;
+  $('#gdAuto').checked = GD.auto; $('#gdVideo').checked = GD.video;
+  const st = GD.state;
+  if (GD.on) {
+    const when = st.last ? new Date(st.last) : null;
+    const today = when && when.toDateString() === new Date().toDateString();
+    $('#gdStatusT').textContent = GD.busy ? 'Salvataggio in corso…' : when ? `Tutto salvato · ${today ? 'oggi' : when.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} alle ${when.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}` : 'Collegato, nessun backup ancora';
+    const q = st.quota;
+    $('#gdStatusS').textContent = [st.counts ? `${st.counts.takes} registrazioni · ${st.counts.texts} testi` : '', q?.limit ? `${fmtGB(+q.usage)} su ${fmtGB(+q.limit)}` : ''].filter(Boolean).join(' · ');
+    $('#gdBar').style.transform = `scaleX(${q?.limit ? Math.min(1, q.usage / q.limit) : 0})`;
+    $('#gdIcon').textContent = GD.busy ? '…' : '✓';
+  }
+  ['#gdConnect', '#gdRestore1', '#gdSaveNow', '#gdRestore2'].forEach((s) => { const b = $(s); if (b) b.disabled = GD.busy; });
+}
+async function gdAction(fn, consent) {
+  gdMsg('');
+  try {
+    if (!GD.client) { const v = $('#gdClientIn').value.trim(); if (!/\.apps\.googleusercontent\.com$/.test(v)) throw new Error('incolla prima l\'ID client (finisce con .apps.googleusercontent.com)'); GD.client = v; ls.set('gdClient', v); }
+    await gdLoad();
+    await gdAuth(consent);
+    await fn();
+  } catch (e) { gdMsg('✗ ' + (e.message || e)); GD.busy = false; paintDrive(); }
+}
+$('#gdConnect').onclick = () => gdAction(async () => { GD.on = true; gdSave(); paintDrive(); await gdBackup(); }, true);
+$('#gdRestore1').onclick = () => gdAction(gdRestore, true);
+$('#gdSaveNow').onclick = () => gdAction(() => gdBackup());
+$('#gdRestore2').onclick = () => gdAction(gdRestore);
+$('#gdAuto').onchange = (e) => { GD.auto = e.target.checked; ls.set('gdAuto', GD.auto); };
+$('#gdVideo').onchange = (e) => { GD.video = e.target.checked; ls.set('gdVideo', GD.video); };
+$('#gdLogout').onclick = () => {
+  if (!confirm('Scollegare Google Drive? Il backup già fatto resta su Drive.')) return;
+  try { if (GD.token) google.accounts.oauth2.revoke(GD.token, () => {}); } catch {}
+  GD.on = false; GD.token = null; GD.map = {}; GD.state = {}; gdSave(); paintDrive(); gdMsg('');
+};
+$('#btnSettings').addEventListener('click', () => { paintDrive(); if (GD.client) gdLoad().catch(() => {}); });
+// a fine allenamento
+async function gdAfterRoutine() {
+  if (!GD.on || !GD.auto) return;
+  const box = $('#rDrive'); if (!box) return;
+  const run = async () => {
+    box.innerHTML = '<div class="gd-toast">☁️ Salvo su Drive…</div>';
+    try { const n = await gdBackup(() => {}); box.innerHTML = `<div class="gd-toast">☁️ ${n ? `Salvate <b>${n} nuove registrazioni</b> su Drive` : 'Tutto già salvato su Drive'}</div>`; }
+    catch (e) { box.innerHTML = `<div class="gd-toast">☁️ Backup non riuscito: ${esc(e.message || String(e))}</div>`; }
+  };
+  if (gdTokenValid()) return run();
+  gdLoad().catch(() => {});
+  box.innerHTML = '<button class="cta small ghost" id="rDriveGo">☁️ Salva su Drive</button>';
+  $('#rDriveGo').onclick = () => gdAuth().then(run).catch((e) => (box.innerHTML = `<div class="gd-toast">☁️ ${esc(e.message || String(e))}</div>`));
+}
+if (GD.on && GD.client) setTimeout(() => gdLoad().catch(() => {}), 3000);
+paintDrive();
 
 /* ---------- avvio ---------- */
 applyPrefs();

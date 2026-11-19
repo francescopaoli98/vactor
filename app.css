@@ -406,3 +406,26 @@ dialog.sheet.chat[open]{display:flex}
 .pr-fix b{display:block;font-size:12px;font-weight:500;color:var(--neon);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px}
 .pr-try{margin-top:8px}
 .pr-notes{gap:18px}
+
+/* backup Google Drive */
+#gdBox .cta{margin-top:4px}
+.gd-lbl{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:14px 2px 2px}
+.gd-status{display:flex;gap:12px;align-items:center;padding:12px 14px;border-radius:16px;background:var(--panel);border:1px solid var(--line2)}
+.gd-dot{width:36px;height:36px;flex:none;border-radius:12px;display:grid;place-items:center;background:#2bff8a1a;color:var(--neon);font-size:16px}
+.gd-status b{display:block;font-weight:500;font-size:15px}
+.gd-status small{color:var(--muted);font-size:13px}
+.gd-bar{height:6px;border-radius:9px;background:#ffffff12;margin:6px 0 8px;overflow:hidden}
+.gd-bar i{display:block;height:100%;background:var(--neon);transform-origin:left;transform:scaleX(0);transition:transform .4s}
+.gd-tog{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 12px;border-radius:12px;background:var(--panel);border:1px solid var(--line);font-size:14px;cursor:pointer}
+.gd-tog small{display:block;color:var(--muted);font-size:12px}
+input.sw{appearance:none;-webkit-appearance:none;width:40px;height:22px;flex:none;border-radius:99px;background:#ffffff22;position:relative;cursor:pointer;transition:background .2s;margin:0}
+input.sw::after{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#8aa99b;transition:all .2s}
+input.sw:checked{background:var(--neon)}
+input.sw:checked::after{left:21px;background:#04140c}
+.gd-row{display:flex;gap:8px}
+.gd-row .cta{flex:1}
+.gd-msg{font-size:13px;color:var(--neon);min-height:18px;line-height:1.45}
+.gd-toast{margin:4px 0 14px;padding:10px 12px;border-radius:14px;background:var(--panel);border:1px solid var(--line2);font-size:13px;color:var(--muted)}
+.gd-toast b{color:var(--neon);font-weight:500}
+#rDrive .cta{margin:4px 0 14px}
+.cta:disabled{opacity:.5}

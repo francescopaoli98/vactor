@@ -184,7 +184,24 @@
     </div>
     <div class="co-info"><span id="coachInfo"></span> <button class="link" id="gkeyDel">rimuovi chiave</button></div>
   </div>
-  <div class="field soon">☁️ Copia su Google Drive <span class="pill">prossima fase</span></div>
+  <div class="field" id="gdBox">☁️ Backup su Google Drive
+    <div id="gdOff">
+      <small class="hint">Salvo le tue registrazioni, i testi e i report del coach in una cartella «VActor» del tuo Drive. Vedo solo quella cartella, il resto del Drive no.</small>
+      <div class="key-row" id="gdClientRow"><input class="in" id="gdClientIn" autocomplete="off" placeholder="ID client Google (…apps.googleusercontent.com)"></div>
+      <button class="cta" id="gdConnect">Collega Google Drive</button>
+      <div class="gd-lbl">Su un telefono nuovo</div>
+      <button class="cta ghost" id="gdRestore1">⬇️ Ripristina da Drive</button>
+    </div>
+    <div id="gdOn" hidden>
+      <div class="gd-status"><span class="gd-dot" id="gdIcon">✓</span><div><b id="gdStatusT"></b><small id="gdStatusS"></small></div></div>
+      <div class="gd-bar"><i id="gdBar"></i></div>
+      <label class="gd-tog"><span>Backup automatico<small>alla fine di ogni allenamento</small></span><input type="checkbox" id="gdAuto" class="sw"></label>
+      <label class="gd-tog"><span>Includi i video<small>occupano molto spazio</small></span><input type="checkbox" id="gdVideo" class="sw"></label>
+      <div class="gd-row"><button class="cta" id="gdSaveNow">☁️ Salva ora</button><button class="cta ghost" id="gdRestore2">⬇️ Ripristina</button></div>
+      <button class="link" id="gdLogout">scollega Google Drive</button>
+    </div>
+    <div class="gd-msg" id="gdMsg"></div>
+  </div>
   <div class="field">🔔 Promemoria allenamento
     <small class="hint">Scegli i giorni e l'orario. Google Calendar ti avviserà sul telefono, in mezzo ai tuoi impegni.</small>
     <div class="days" id="days"></div>

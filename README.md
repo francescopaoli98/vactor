@@ -35,3 +35,7 @@ La tua cabina personale di lettura, dizione e doppiaggio. È una web app che si 
 - Quando il modello migliore finisce il limite gratuito si passa da soli al modello leggero.
 - Chat con il coach: descrivi un problema a parole (e se vuoi con una registrazione); il coach risponde, propone esercizi da aggiungere ai testi e ricorda i tuoi punti deboli, che poi controlla in ogni analisi.
 - Scelta del modello: Leggero (~500 analisi al giorno, predefinito) o Migliore (~20 al giorno, più sensibile alle sfumature).
+
+**Backup su Google Drive**
+- Cartella «VActor» sul tuo Drive con registrazioni, testi, report del coach e impostazioni (non la chiave Gemini). Permesso `drive.file`: l'app vede solo i file che ha creato.
+- Backup incrementale, automatico a fine allenamento, video facoltativi; ripristino su un telefono nuovo.
